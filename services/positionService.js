@@ -1,5 +1,4 @@
-import prisma from "../prismaClient.js";
-
+import { prisma } from "../prismaClient.js";
 export const createPosition = async (data) => {
   return await prisma.position.create({ data });
 };

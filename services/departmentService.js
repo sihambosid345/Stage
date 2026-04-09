@@ -1,5 +1,4 @@
-import prisma from "../prismaClient.js";
-
+import { prisma } from "../prismaClient.js";
 export const createDepartment = async (data) => {
   return await prisma.department.create({ data });
 };

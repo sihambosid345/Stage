@@ -165,8 +165,8 @@ model Company {
   payslips           Payslip[]
   license            License?
   auditLogs          AuditLog[]
-  employeeContracts  EmployeeContract[]  // ✅ relation manquante ajoutée
-  payrollItems       PayrollItem[]       // ✅ relation manquante ajoutée
+  employeeContracts  EmployeeContract[]  
+  payrollItems       PayrollItem[]       
 
   @@index([status])
   @@map("companies")
@@ -203,7 +203,7 @@ model Position {
   updatedAt    DateTime    @updatedAt
 
   company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull) // ✅ relation opposée ajoutée dans Department
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull) 
   employees    Employee[]
 
   @@unique([companyId, name])
