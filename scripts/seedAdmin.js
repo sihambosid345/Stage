@@ -1,11 +1,9 @@
-
-
 import { prisma } from "../lib/prisma.js";
 import bcrypt from "bcryptjs";
 
 const ADMIN = {
   email:     process.env.ADMIN_EMAIL    || "siham@gmail.com",
-  password:  process.env.ADMIN_PASSWORD || "1234",
+  password:  process.env.ADMIN_PASSWORD || "123456",
   firstName: "Super",
   lastName:  "Admin",
   role:      "ADMIN",
@@ -13,10 +11,10 @@ const ADMIN = {
 };
 
 async function seed() {
-  console.log(" Vérification admin existant...");
+  console.log("Vérification admin existant...");
   const company = await prisma.company.findFirst();
   if (!company) {
-    console.error(" Aucune entreprise trouvée. Créez d'abord une company.");
+    console.error("Aucune entreprise trouvée. Créez d'abord une company.");
     process.exit(1);
   }
 
@@ -25,10 +23,18 @@ async function seed() {
   });
 
   if (existing) {
-    console.log(` Admin déjà existant : ${existing.email}`);
+    // Mise à jour du mot de passe si l'admin existe déjà
+    const passwordHash = await bcrypt.hash(ADMIN.password, 12);
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { passwordHash, status: "ACTIVE" },
+    });
+    console.log(`Admin mis à jour : ${existing.email}`);
+    console.log(`Password : ${ADMIN.password}`);
     process.exit(0);
   }
 
+ 
   const passwordHash = await bcrypt.hash(ADMIN.password, 12);
 
   const user = await prisma.user.create({
@@ -48,9 +54,8 @@ async function seed() {
   console.log(`   Email    : ${user.email}`);
   console.log(`   Password : ${ADMIN.password}`);
   console.log(`   ID       : ${user.id}`);
-  console.log("\n⚠️  Changez le mot de passe après la première connexion !");
 }
 
 seed()
-  .catch((e) => { console.error(" Erreur:", e.message); process.exit(1); })
+  .catch((e) => { console.error("Erreur:", e.message); process.exit(1); })
   .finally(() => prisma.$disconnect());
