@@ -14,6 +14,7 @@ const PUBLIC_SELECT = {
   email:       true,
   phone:       true,
   role:        true,
+  permissions: true,
   status:      true,
   lastLoginAt: true,
   createdAt:   true,
@@ -26,7 +27,7 @@ const notFound = () => { const e = new Error("Utilisateur introuvable."); e.stat
 // ─── CRUD ──────────────────────────────────────────────────────────────────────
 
 export const createUser = async (data) => {
-  const { password, ...rest } = data;
+  const { password, permissions, ...rest } = data;
 
   if (!password) {
     const err = new Error("Le mot de passe est obligatoire.");
@@ -40,6 +41,7 @@ export const createUser = async (data) => {
     data: {
       ...rest,
       email:        rest.email?.toLowerCase().trim(),
+      permissions:  Array.isArray(permissions) ? permissions : [],
       passwordHash,
     },
     select: PUBLIC_SELECT,
@@ -56,10 +58,11 @@ export const getUserById = async (id) => {
 };
 
 export const updateUser = async (id, data) => {
-  const { password, ...rest } = data;
+  const { password, permissions, ...rest } = data;
 
   const updateData = { ...rest };
   if (rest.email) updateData.email = rest.email.toLowerCase().trim();
+  if (Array.isArray(permissions)) updateData.permissions = permissions;
 
   // Si un nouveau mot de passe est fourni, on le hashe
   if (password) {

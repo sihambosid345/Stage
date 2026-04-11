@@ -19,6 +19,7 @@ export const login = async ({ email, password }) => {
     select: {
       id: true, companyId: true, firstName: true, lastName: true,
       fullName: true, email: true, phone: true, role: true,
+      permissions: true,
       status: true, passwordHash: true, lastLoginAt: true,
       company: { select: { id: true, name: true, status: true } },
     },

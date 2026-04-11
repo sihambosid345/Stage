@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 enum CompanyStatus {
@@ -71,6 +71,7 @@ enum PayrollItemType {
   ADVANCE
   TAX
   CNSS
+  AMO
   OTHER
 }
 
@@ -136,8 +137,29 @@ enum BillingCycle {
   LIFETIME
 }
 
+enum PayrollRegime {
+  MOROCCO_STANDARD
+}
+
+enum ContributionCode {
+  CNSS_EMPLOYEE
+  CNSS_EMPLOYER
+  AMO_EMPLOYEE
+  AMO_EMPLOYER
+  TRAINING_TAX
+  FAMILY_ALLOWANCE
+  SOCIAL_BENEFITS
+}
+
+enum CnssReportStatus {
+  DRAFT
+  GENERATED
+  VALIDATED
+  EXPORTED
+}
+
 model Company {
-  id                 String          @id @default(uuid())
+  id                 String             @id @default(uuid())
   name               String
   legalName          String?
   taxIdentifier      String?
@@ -148,12 +170,13 @@ model Company {
   phone              String?
   address            String?
   city               String?
-  country            String?         @default("Maroc")
-  timezone           String?         @default("Africa/Casablanca")
-  currency           String?         @default("MAD")
-  status             CompanyStatus   @default(ACTIVE)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  country            String?            @default("Maroc")
+  timezone           String?            @default("Africa/Casablanca")
+  currency           String?            @default("MAD")
+  medicalSector      Boolean?           @default(false)
+  status             CompanyStatus      @default(ACTIVE)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   users              User[]
   employees          Employee[]
@@ -166,8 +189,12 @@ model Company {
   payslips           Payslip[]
   license            License?
   auditLogs          AuditLog[]
-  employeeContracts  EmployeeContract[]  
-  payrollItems       PayrollItem[]       
+  payrollConfig      PayrollConfig?
+  statutoryRates     StatutoryRate[]
+  taxBrackets        TaxBracket[]
+  cnssReports        CnssReport[]
+  employeeContracts  EmployeeContract[]
+  payrollItems       PayrollItem[]
 
   @@index([status])
   @@map("companies")
@@ -185,7 +212,7 @@ model Department {
 
   company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employees   Employee[]
-  positions   Position[] // ✅ relation manquante ajoutée
+  positions   Position[]
 
   @@unique([companyId, name])
   @@index([companyId, isActive])
@@ -204,7 +231,7 @@ model Position {
   updatedAt    DateTime    @updatedAt
 
   company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull) 
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   employees    Employee[]
 
   @@unique([companyId, name])
@@ -213,19 +240,20 @@ model Position {
 }
 
 model User {
-  id             String      @id @default(uuid())
+  id             String          @id @default(uuid())
   companyId      String
   firstName      String
   lastName       String
-  fullName       String?
+  fullName       String?                      // ✅ ajouté
   email          String
   phone          String?
   passwordHash   String
   role           String
-  status         UserStatus  @default(ACTIVE)
+  permissions    String[]        @default([]) // ✅ ajouté
+  status         UserStatus      @default(ACTIVE)
   lastLoginAt    DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdPeriods PayrollPeriod[] @relation("PayrollPeriodCreatedBy")
@@ -240,45 +268,52 @@ model User {
 }
 
 model Employee {
-  id                  String          @id @default(uuid())
-  companyId           String
-  employeeCode        String?
-  firstName           String
-  lastName            String
-  fullName            String?
-  cin                 String?
-  cnssNumber          String?
-  matricule           String?
-  gender              Gender?
-  birthDate           DateTime?
-  phone               String?
-  email               String?
-  address             String?
-  city                String?
-  hireDate            DateTime
-  terminationDate     DateTime?
-  status              EmployeeStatus  @default(ACTIVE)
+  id                String         @id @default(uuid())
+  companyId         String
+  employeeCode      String?
+  firstName         String
+  lastName          String
+  fullName          String?                    // ✅ ajouté
+  cin               String?
+  cnssNumber        String?
+  matricule         String?
+  taxIdentifier     String?
+  gender            Gender?
+  birthDate         DateTime?
+  maritalStatus     String?
+  childrenCount     Int?           @default(0)
+  phone             String?
+  email             String?
+  address           String?
+  city              String?
+  hireDate          DateTime
+  terminationDate   DateTime?
+  status            EmployeeStatus @default(ACTIVE)
 
-  departmentId        String?
-  positionId          String?
+  departmentId      String?
+  positionId        String?
 
-  baseSalary          Decimal?        @db.Decimal(12, 2)
-  paymentMode         String?
-  bankName            String?
-  bankAccountNumber   String?
+  baseSalary        Decimal?       @db.Decimal(12, 2)
+  paymentMode       String?
+  bankName          String?
+  bankAccountNumber String?
 
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  isCnssDeclared    Boolean?       @default(true)
+  isAmoEligible     Boolean?       @default(true)
 
-  company             Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department          Department?     @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  position            Position?       @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  contracts           EmployeeContract[]
-  variableItems       VariableItem[]
-  attendanceRecords   AttendanceRecord[]
-  payrollItems        PayrollItem[]
-  payslips            Payslip[]
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department        Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position          Position?      @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  contracts         EmployeeContract[]
+  variableItems     VariableItem[]
+  attendanceRecords AttendanceRecord[]
+  payrollItems      PayrollItem[]
+  payslips          Payslip[]
+  cnssReportLines   CnssReportLine[]
 
   @@unique([companyId, employeeCode])
   @@unique([companyId, cin])
@@ -289,50 +324,127 @@ model Employee {
 }
 
 model EmployeeContract {
-  id                    String          @id @default(uuid())
-  companyId             String
-  employeeId            String
-  contractType          ContractType
-  status                ContractStatus  @default(DRAFT)
+  id                      String         @id @default(uuid())
+  companyId               String
+  employeeId              String
+  contractType            ContractType
+  status                  ContractStatus @default(DRAFT)
 
-  startDate             DateTime
-  endDate               DateTime?
-  baseSalary            Decimal         @db.Decimal(12, 2)
+  startDate               DateTime
+  endDate                 DateTime?
+  baseSalary              Decimal        @db.Decimal(12, 2)
 
-  hoursPerMonth         Decimal?        @db.Decimal(8, 2)
-  workingDaysPerMonth   Decimal?        @db.Decimal(8, 2)
+  hoursPerMonth           Decimal?       @db.Decimal(8, 2)
+  workingDaysPerMonth     Decimal?       @db.Decimal(8, 2)
 
-  notes                 String?
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
+  cnssDeclaredSalary      Decimal?       @db.Decimal(12, 2)
+  transportAllowance      Decimal?       @db.Decimal(12, 2)
+  representationAllowance Decimal?       @db.Decimal(12, 2)
+  seniorityAllowance      Decimal?       @db.Decimal(12, 2)
 
-  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  company               Company         @relation(fields: [companyId], references: [id], onDelete: Cascade) // ✅ relation opposée ajoutée dans Company
+  notes                   String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  employee                Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company                 Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, employeeId, status])
   @@index([employeeId, startDate, endDate])
   @@map("employee_contracts")
 }
 
+model PayrollConfig {
+  id                      String        @id @default(uuid())
+  companyId               String        @unique
+  regime                  PayrollRegime @default(MOROCCO_STANDARD)
+
+  currency                String        @default("MAD")
+  weeklyHours             Decimal?      @db.Decimal(8, 2)
+  monthlyHours            Decimal?      @db.Decimal(8, 2)
+  workingDaysPerMonth     Decimal?      @db.Decimal(8, 2)
+
+  cnssEnabled             Boolean       @default(true)
+  amoEnabled              Boolean       @default(true)
+  irEnabled               Boolean       @default(true)
+  cimrEnabled             Boolean       @default(false)
+
+  defaultCnssDeclaredDays Int?          @default(26)
+  payslipTemplate         String?
+  notes                   String?
+
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  company                 Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("payroll_configs")
+}
+
+model StatutoryRate {
+  id               String           @id @default(uuid())
+  companyId        String?
+  code             ContributionCode
+  label            String
+  rate             Decimal          @db.Decimal(8, 4)
+  ceilingAmount    Decimal?         @db.Decimal(12, 2)
+  floorAmount      Decimal?         @db.Decimal(12, 2)
+  appliesToTaxable Boolean          @default(false)
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  company          Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([code, effectiveFrom, effectiveTo])
+  @@index([companyId, code])
+  @@map("statutory_rates")
+}
+
+model TaxBracket {
+  id              String    @id @default(uuid())
+  companyId       String?
+  taxCode         String    @default("IR_SALAIRE")
+  annualFrom      Decimal   @db.Decimal(12, 2)
+  annualTo        Decimal?  @db.Decimal(12, 2)
+  rate            Decimal   @db.Decimal(8, 4)
+  deductionAmount Decimal   @default(0) @db.Decimal(12, 2)
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company         Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([taxCode, effectiveFrom, effectiveTo])
+  @@index([companyId, taxCode])
+  @@map("tax_brackets")
+}
+
 model PayrollPeriod {
-  id               String               @id @default(uuid())
-  companyId        String
-  year             Int
-  month            Int
-  startDate        DateTime
-  endDate          DateTime
-  status           PayrollPeriodStatus  @default(OPEN)
-  isLocked         Boolean              @default(false)
-  notes            String?
+  id            String              @id @default(uuid())
+  companyId     String
+  year          Int
+  month         Int
+  startDate     DateTime
+  endDate       DateTime
+  status        PayrollPeriodStatus @default(OPEN)
+  isLocked      Boolean             @default(false)
+  notes         String?
 
-  createdById      String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  createdById   String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
-  company          Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy        User?                @relation("PayrollPeriodCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  payrollRuns      PayrollRun[]
-  payslips         Payslip[]
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy     User?               @relation("PayrollPeriodCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  payrollRuns   PayrollRun[]
+  payslips      Payslip[]
+  variableItems VariableItem[]
+  cnssReport    CnssReport?
 
   @@unique([companyId, year, month])
   @@index([companyId, status])
@@ -340,34 +452,37 @@ model PayrollPeriod {
 }
 
 model PayrollRun {
-  id                    String            @id @default(uuid())
-  companyId             String
-  payrollPeriodId       String
-  runNumber             Int               @default(1)
-  status                PayrollRunStatus  @default(DRAFT)
+  id                   String           @id @default(uuid())
+  companyId            String
+  payrollPeriodId      String
+  runNumber            Int              @default(1)
+  status               PayrollRunStatus @default(DRAFT)
 
-  totalEmployees        Int               @default(0)
-  totalGross            Decimal           @default(0) @db.Decimal(14, 2)
-  totalDeductions       Decimal           @default(0) @db.Decimal(14, 2)
-  totalNet              Decimal           @default(0) @db.Decimal(14, 2)
+  totalEmployees       Int              @default(0)
+  totalGross           Decimal          @default(0) @db.Decimal(14, 2)
+  totalDeductions      Decimal          @default(0) @db.Decimal(14, 2)
+  totalNet             Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployerCharges Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployeeCharges Decimal          @default(0) @db.Decimal(14, 2)
+  totalTax             Decimal          @default(0) @db.Decimal(14, 2)
 
-  createdById           String?
-  approvedById          String?
-  approvedAt            DateTime?
-  startedAt             DateTime?
-  completedAt           DateTime?
-  notes                 String?
+  createdById          String?
+  approvedById         String?
+  approvedAt           DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  notes                String?
 
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
-  company               Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payrollPeriod         PayrollPeriod     @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  createdBy             User?             @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  approvedBy            User?             @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  company              Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollPeriod        PayrollPeriod    @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  createdBy            User?            @relation("PayrollRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy           User?            @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
-  payrollItems          PayrollItem[]
-  payslips              Payslip[]
+  payrollItems         PayrollItem[]
+  payslips             Payslip[]
 
   @@unique([payrollPeriodId, runNumber])
   @@index([companyId, payrollPeriodId, status])
@@ -375,27 +490,27 @@ model PayrollRun {
 }
 
 model PayrollItem {
-  id                 String           @id @default(uuid())
-  companyId          String
-  payrollRunId       String
-  employeeId         String
-  itemType           PayrollItemType
-  code               String?
-  label              String
-  quantity           Decimal?         @db.Decimal(10, 2)
-  rate               Decimal?         @db.Decimal(12, 2)
-  amount             Decimal          @db.Decimal(12, 2)
-  taxable            Boolean          @default(false)
-  cnssApplicable     Boolean          @default(false)
-  sortOrder          Int              @default(0)
-  metadata           Json?
+  id             String          @id @default(uuid())
+  companyId      String
+  payrollRunId   String
+  employeeId     String
+  itemType       PayrollItemType
+  code           String?
+  label          String
+  quantity       Decimal?        @db.Decimal(10, 2)
+  rate           Decimal?        @db.Decimal(12, 2)
+  amount         Decimal         @db.Decimal(12, 2)
+  taxable        Boolean         @default(false)
+  cnssApplicable Boolean         @default(false)
+  sortOrder      Int             @default(0)
+  metadata       Json?
 
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  company            Company          @relation(fields: [companyId], references: [id], onDelete: Cascade) // ✅ relation opposée ajoutée dans Company
-  payrollRun         PayrollRun       @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  employee           Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollRun     PayrollRun      @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([companyId, payrollRunId])
   @@index([employeeId, itemType])
@@ -403,51 +518,53 @@ model PayrollItem {
 }
 
 model VariableItem {
-  id                  String              @id @default(uuid())
-  companyId           String
-  employeeId          String
-  type                VariableItemType
-  valueType           VariableValueType   @default(FIXED)
-  code                String?
-  label               String
-  quantity            Decimal?            @db.Decimal(10, 2)
-  unitValue           Decimal?            @db.Decimal(12, 2)
-  percentageValue     Decimal?            @db.Decimal(8, 2)
-  amount              Decimal             @db.Decimal(12, 2)
+  id              String             @id @default(uuid())
+  companyId       String
+  employeeId      String
+  type            VariableItemType
+  valueType       VariableValueType  @default(FIXED)
+  code            String?
+  label           String
+  quantity        Decimal?           @db.Decimal(10, 2)
+  unitValue       Decimal?           @db.Decimal(12, 2)
+  percentageValue Decimal?           @db.Decimal(8, 2)
+  amount          Decimal            @db.Decimal(12, 2)
 
-  effectiveDate       DateTime
-  payrollPeriodId     String?
-  status              VariableItemStatus  @default(PENDING)
-  notes               String?
+  effectiveDate   DateTime
+  payrollPeriodId String?
+  payrollPeriod   PayrollPeriod?     @relation(fields: [payrollPeriodId], references: [id], onDelete: SetNull)
+  status          VariableItemStatus @default(PENDING)
+  notes           String?
 
-  createdById         String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  createdById     String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee            Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  createdBy           User?               @relation("VariableItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy       User?              @relation("VariableItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([companyId, employeeId, type])
   @@index([companyId, effectiveDate, status])
+  @@index([payrollPeriodId])
   @@map("variable_items")
 }
 
 model AttendanceRecord {
-  id                String            @id @default(uuid())
-  companyId         String
-  employeeId        String
-  date              DateTime
-  status            AttendanceStatus
-  workedHours       Decimal?          @db.Decimal(8, 2)
-  overtimeHours     Decimal?          @db.Decimal(8, 2)
-  lateMinutes       Int?
-  notes             String?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  id            String           @id @default(uuid())
+  companyId     String
+  employeeId    String
+  date          DateTime
+  status        AttendanceStatus
+  workedHours   Decimal?         @db.Decimal(8, 2)
+  overtimeHours Decimal?         @db.Decimal(8, 2)
+  lateMinutes   Int?
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee          Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee      Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, date])
   @@index([companyId, date])
@@ -455,67 +572,148 @@ model AttendanceRecord {
 }
 
 model Payslip {
-  id                    String          @id @default(uuid())
-  companyId             String
-  employeeId            String
-  payrollPeriodId       String
-  payrollRunId          String?
-  status                PayslipStatus   @default(DRAFT)
+  id                   String                @id @default(uuid())
+  companyId            String
+  employeeId           String
+  payrollPeriodId      String
+  payrollRunId         String?
+  status               PayslipStatus         @default(DRAFT)
 
-  grossSalary           Decimal         @default(0) @db.Decimal(12, 2)
-  totalAllowances       Decimal         @default(0) @db.Decimal(12, 2)
-  totalBonuses          Decimal         @default(0) @db.Decimal(12, 2)
-  totalDeductions       Decimal         @default(0) @db.Decimal(12, 2)
-  totalAdvances         Decimal         @default(0) @db.Decimal(12, 2)
-  totalTax              Decimal         @default(0) @db.Decimal(12, 2)
-  totalCnss             Decimal         @default(0) @db.Decimal(12, 2)
-  netSalary             Decimal         @default(0) @db.Decimal(12, 2)
+  grossSalary          Decimal               @default(0) @db.Decimal(12, 2)
+  taxableGross         Decimal               @default(0) @db.Decimal(12, 2)
+  totalAllowances      Decimal               @default(0) @db.Decimal(12, 2)
+  totalBonuses         Decimal               @default(0) @db.Decimal(12, 2)
+  totalDeductions      Decimal               @default(0) @db.Decimal(12, 2)
+  totalAdvances        Decimal               @default(0) @db.Decimal(12, 2)
+  totalTax             Decimal               @default(0) @db.Decimal(12, 2)
+  totalCnss            Decimal               @default(0) @db.Decimal(12, 2)
+  netSalary            Decimal               @default(0) @db.Decimal(12, 2)
 
-  currency              String?         @default("MAD")
-  pdfPath               String?
-  pdfGeneratedAt        DateTime?
-  sentAt                DateTime?
-  snapshotData          Json?
+  cnssBase             Decimal               @default(0) @db.Decimal(12, 2)
+  cnssCeilingApplied   Decimal?              @db.Decimal(12, 2)
+  amoBase              Decimal               @default(0) @db.Decimal(12, 2)
+  employerChargesTotal Decimal               @default(0) @db.Decimal(12, 2)
+  employeeChargesTotal Decimal               @default(0) @db.Decimal(12, 2)
+  incomeTaxBase        Decimal               @default(0) @db.Decimal(12, 2)
+  incomeTaxAmount      Decimal               @default(0) @db.Decimal(12, 2)
+  declaredDays         Int?                  @default(26)
 
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
+  currency             String?               @default("MAD")
+  pdfPath              String?
+  pdfGeneratedAt       DateTime?
+  sentAt               DateTime?
+  snapshotData         Json?
 
-  company               Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  payrollPeriod         PayrollPeriod   @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  payrollRun            PayrollRun?     @relation(fields: [payrollRunId], references: [id], onDelete: SetNull)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee             Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  payrollPeriod        PayrollPeriod         @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  payrollRun           PayrollRun?           @relation(fields: [payrollRunId], references: [id], onDelete: SetNull)
+  contributions        PayslipContribution[]
 
   @@unique([employeeId, payrollPeriodId])
   @@index([companyId, payrollPeriodId, status])
   @@map("payslips")
 }
 
+model PayslipContribution {
+  id             String   @id @default(uuid())
+  payslipId      String
+  code           String
+  label          String
+  baseAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  ceilingAmount  Decimal? @db.Decimal(12, 2)
+  rate           Decimal  @default(0) @db.Decimal(8, 4)
+  employeeAmount Decimal  @default(0) @db.Decimal(12, 2)
+  employerAmount Decimal  @default(0) @db.Decimal(12, 2)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  payslip        Payslip  @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId, code])
+  @@map("payslip_contributions")
+}
+
+model CnssReport {
+  id                 String           @id @default(uuid())
+  companyId          String
+  payrollPeriodId    String           @unique
+  status             CnssReportStatus @default(DRAFT)
+  affiliationNumber  String?
+  totalDeclaredDays  Int              @default(0)
+  totalGrossSalary   Decimal          @default(0) @db.Decimal(14, 2)
+  totalCnssBase      Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployeeShare Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployerShare Decimal          @default(0) @db.Decimal(14, 2)
+  totalAmo           Decimal          @default(0) @db.Decimal(14, 2)
+  totalTrainingTax   Decimal          @default(0) @db.Decimal(14, 2)
+  pdfPath            String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollPeriod      PayrollPeriod    @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  lines              CnssReportLine[]
+
+  @@unique([companyId, payrollPeriodId])
+  @@map("cnss_reports")
+}
+
+model CnssReportLine {
+  id                String     @id @default(uuid())
+  reportId          String
+  employeeId        String
+  cnssNumber        String?
+  employeeName      String
+  matricule         String?
+  declaredDays      Int        @default(0)
+  grossSalary       Decimal    @default(0) @db.Decimal(12, 2)
+  realBase          Decimal    @default(0) @db.Decimal(12, 2)
+  ceilingBase       Decimal?   @db.Decimal(12, 2)
+  employeeShare     Decimal    @default(0) @db.Decimal(12, 2)
+  employerShare     Decimal    @default(0) @db.Decimal(12, 2)
+  amoAmount         Decimal    @default(0) @db.Decimal(12, 2)
+  trainingTaxAmount Decimal    @default(0) @db.Decimal(12, 2)
+  metadata          Json?
+  createdAt         DateTime   @default(now())
+
+  report            CnssReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  employee          Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([employeeId])
+  @@map("cnss_report_lines")
+}
+
 model License {
-  id                  String           @id @default(uuid())
-  companyId           String           @unique
-  planCode            LicensePlanCode
-  status              LicenseStatus    @default(TRIAL)
-  billingCycle        BillingCycle     @default(MONTHLY)
+  id              String          @id @default(uuid())
+  companyId       String          @unique
+  planCode        LicensePlanCode
+  status          LicenseStatus   @default(TRIAL)
+  billingCycle    BillingCycle    @default(MONTHLY)
 
-  maxUsers            Int?
-  maxEmployees        Int?
-  maxStorageMb        Int?
+  maxUsers        Int?
+  maxEmployees    Int?
+  maxStorageMb    Int?
 
-  payrollEnabled      Boolean          @default(true)
-  rhEnabled           Boolean          @default(true)
-  cnssEnabled         Boolean          @default(false)
-  taxEnabled          Boolean          @default(false)
-  damancomEnabled     Boolean          @default(false)
+  payrollEnabled  Boolean         @default(true)
+  rhEnabled       Boolean         @default(true)
+  cnssEnabled     Boolean         @default(false)
+  taxEnabled      Boolean         @default(false)
+  damancomEnabled Boolean         @default(false)
 
-  startsAt            DateTime
-  endsAt              DateTime?
-  lastRenewedAt       DateTime?
-  notes               String?
+  startsAt        DateTime
+  endsAt          DateTime?
+  lastRenewedAt   DateTime?
+  notes           String?
 
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
-  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([status, planCode])
   @@index([startsAt, endsAt])
@@ -523,18 +721,18 @@ model License {
 }
 
 model AuditLog {
-  id            String    @id @default(uuid())
-  companyId     String
-  userId        String?
-  action        String
-  entityType    String
-  entityId      String?
-  description   String?
-  metadata      Json?
-  createdAt     DateTime  @default(now())
+  id          String   @id @default(uuid())
+  companyId   String
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
 
-  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([companyId, entityType, entityId])
   @@index([companyId, action, createdAt])
