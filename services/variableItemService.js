@@ -1,12 +1,21 @@
 import { prisma } from "../prismaClient.js";
+
 const includeRelations = {
   employee: { select: { id: true, firstName: true, lastName: true } },
   company: { select: { id: true, name: true } },
   createdBy: { select: { id: true, firstName: true, lastName: true } },
 };
 
+const parseDates = (data) => ({
+  ...data,
+  effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : undefined, // ✅ fix
+});
+
 export const createVariableItem = async (data) => {
-  return await prisma.variableItem.create({ data, include: includeRelations });
+  return await prisma.variableItem.create({
+    data: parseDates(data), // ✅ fix
+    include: includeRelations,
+  });
 };
 
 export const getVariableItems = async () => {
@@ -32,7 +41,11 @@ export const getVariableItemsByEmployee = async (employeeId) => {
 
 export const updateVariableItem = async (id, data) => {
   await getVariableItemById(id);
-  return await prisma.variableItem.update({ where: { id }, data, include: includeRelations });
+  return await prisma.variableItem.update({
+    where: { id },
+    data: parseDates(data), // ✅ fix
+    include: includeRelations,
+  });
 };
 
 export const deleteVariableItem = async (id) => {

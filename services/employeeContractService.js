@@ -1,11 +1,21 @@
 import { prisma } from "../prismaClient.js";
+
 const includeRelations = {
   employee: { select: { id: true, firstName: true, lastName: true } },
   company: { select: { id: true, name: true } },
 };
 
+const parseDates = (data) => ({
+  ...data,
+  startDate: data.startDate ? new Date(data.startDate) : undefined,
+  endDate: data.endDate ? new Date(data.endDate) : undefined,
+});
+
 export const createContract = async (data) => {
-  return await prisma.employeeContract.create({ data, include: includeRelations });
+  return await prisma.employeeContract.create({
+    data: parseDates(data), // ✅ fix
+    include: includeRelations,
+  });
 };
 
 export const getContracts = async () => {
@@ -30,7 +40,11 @@ export const getContractsByEmployee = async (employeeId) => {
 
 export const updateContract = async (id, data) => {
   await getContractById(id);
-  return await prisma.employeeContract.update({ where: { id }, data, include: includeRelations });
+  return await prisma.employeeContract.update({
+    where: { id },
+    data: parseDates(data), // ✅ fix
+    include: includeRelations,
+  });
 };
 
 export const deleteContract = async (id) => {

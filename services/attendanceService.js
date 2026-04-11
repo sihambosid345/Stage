@@ -1,11 +1,18 @@
 import { prisma } from "../prismaClient.js";
+
 const includeRelations = {
   employee: { select: { id: true, firstName: true, lastName: true } },
   company: { select: { id: true, name: true } },
 };
 
 export const createAttendance = async (data) => {
-  return await prisma.attendanceRecord.create({ data, include: includeRelations });
+  return await prisma.attendanceRecord.create({
+    data: {
+      ...data,
+      date: new Date(data.date), 
+    },
+    include: includeRelations,
+  });
 };
 
 export const getAttendances = async () => {
@@ -34,7 +41,14 @@ export const getAttendanceByEmployee = async (employeeId) => {
 
 export const updateAttendance = async (id, data) => {
   await getAttendanceById(id);
-  return await prisma.attendanceRecord.update({ where: { id }, data, include: includeRelations });
+  return await prisma.attendanceRecord.update({
+    where: { id },
+    data: {
+      ...data,
+      date: data.date ? new Date(data.date) : undefined, 
+    },
+    include: includeRelations,
+  });
 };
 
 export const deleteAttendance = async (id) => {
