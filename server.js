@@ -37,21 +37,24 @@ app.use("/auth", authRoutes);
 // ─── Protected ───────────────────────────────────────────────────────────────
 
 const api = Router();
-api.use(authenticate, requireAdmin);
+// Authentification requise pour toutes les routes protégées
+// requireAdmin s'applique seulement sur les routes sensibles (users, companies, licenses)
+api.use(authenticate);
 
-// Companies
-api.post  ("/companies",     companyCtrl.createCompany);
-api.get   ("/companies",     companyCtrl.getCompanies);
-api.get   ("/companies/:id", companyCtrl.getCompany);
-api.put   ("/companies/:id", companyCtrl.updateCompany);
-api.delete("/companies/:id", companyCtrl.deleteCompany);
+// Companies — admin only (full list)
+api.post  ("/companies",     requireAdmin, companyCtrl.createCompany);
+api.get   ("/companies",     requireAdmin, companyCtrl.getCompanies);
+api.get   ("/companies/mine", companyCtrl.getMyCompany);
+api.get   ("/companies/:id", requireAdmin, companyCtrl.getCompany);
+api.put   ("/companies/:id", requireAdmin, companyCtrl.updateCompany);
+api.delete("/companies/:id", requireAdmin, companyCtrl.deleteCompany);
 
-// Users
-api.post  ("/users",     userCtrl.createUser);
-api.get   ("/users",     userCtrl.getUsers);
-api.get   ("/users/:id", userCtrl.getUser);
-api.put   ("/users/:id", userCtrl.updateUser);
-api.delete("/users/:id", userCtrl.deleteUser);
+// Users — admin only
+api.post  ("/users",     requireAdmin, userCtrl.createUser);
+api.get   ("/users",     requireAdmin, userCtrl.getUsers);
+api.get   ("/users/:id", requireAdmin, userCtrl.getUser);
+api.put   ("/users/:id", requireAdmin, userCtrl.updateUser);
+api.delete("/users/:id", requireAdmin, userCtrl.deleteUser);
 
 // Departments
 api.post  ("/departments",     departmentCtrl.createDepartment);
@@ -131,13 +134,13 @@ api.get   ("/variable-items/employee/:employeeId",variableCtrl.getVariableItemsB
 api.put   ("/variable-items/:id",                 variableCtrl.updateVariableItem);
 api.delete("/variable-items/:id",                 variableCtrl.deleteVariableItem);
 
-// Licenses
-api.post  ("/licenses",                           licenseCtrl.createLicense);
-api.get   ("/licenses",                           licenseCtrl.getLicenses);
-api.get   ("/licenses/:id",                       licenseCtrl.getLicense);
-api.get   ("/licenses/company/:companyId",        licenseCtrl.getLicenseByCompany);
-api.put   ("/licenses/:id",                       licenseCtrl.updateLicense);
-api.delete("/licenses/:id",                       licenseCtrl.deleteLicense);
+// Licenses — admin only
+api.post  ("/licenses",                           requireAdmin, licenseCtrl.createLicense);
+api.get   ("/licenses",                           requireAdmin, licenseCtrl.getLicenses);
+api.get   ("/licenses/:id",                       requireAdmin, licenseCtrl.getLicense);
+api.get   ("/licenses/company/:companyId",        requireAdmin, licenseCtrl.getLicenseByCompany);
+api.put   ("/licenses/:id",                       requireAdmin, licenseCtrl.updateLicense);
+api.delete("/licenses/:id",                       requireAdmin, licenseCtrl.deleteLicense);
 
 app.use(api);
 

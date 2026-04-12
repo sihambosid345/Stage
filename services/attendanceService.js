@@ -1,57 +1,31 @@
 import { prisma } from "../prismaClient.js";
 
-const includeRelations = {
+const include = {
   employee: { select: { id: true, firstName: true, lastName: true } },
   company: { select: { id: true, name: true } },
 };
 
-export const createAttendance = async (data) => {
-  return await prisma.attendanceRecord.create({
-    data: {
-      ...data,
-      date: new Date(data.date), 
-    },
-    include: includeRelations,
-  });
+export const createAttendance = async (data) =>
+  prisma.attendanceRecord.create({ data, include });
+
+export const getAttendances = async (companyId) =>
+  prisma.attendanceRecord.findMany({ where: { companyId }, include, orderBy: { date: "desc" } });
+
+export const getAttendanceById = async (id, companyId) => {
+  const r = await prisma.attendanceRecord.findFirst({ where: { id, companyId }, include });
+  if (!r) throw { status: 404, message: "Attendance record not found" };
+  return r;
 };
 
-export const getAttendances = async () => {
-  return await prisma.attendanceRecord.findMany({
-    include: includeRelations,
-    orderBy: { date: "desc" },
-  });
+export const getAttendanceByEmployee = async (employeeId, companyId) =>
+  prisma.attendanceRecord.findMany({ where: { employeeId, companyId }, include, orderBy: { date: "desc" } });
+
+export const updateAttendance = async (id, data, companyId) => {
+  await getAttendanceById(id, companyId);
+  return prisma.attendanceRecord.update({ where: { id }, data, include });
 };
 
-export const getAttendanceById = async (id) => {
-  const record = await prisma.attendanceRecord.findUnique({
-    where: { id },
-    include: includeRelations,
-  });
-  if (!record) throw { status: 404, message: "Attendance record not found" };
-  return record;
-};
-
-export const getAttendanceByEmployee = async (employeeId) => {
-  return await prisma.attendanceRecord.findMany({
-    where: { employeeId },
-    include: includeRelations,
-    orderBy: { date: "desc" },
-  });
-};
-
-export const updateAttendance = async (id, data) => {
-  await getAttendanceById(id);
-  return await prisma.attendanceRecord.update({
-    where: { id },
-    data: {
-      ...data,
-      date: data.date ? new Date(data.date) : undefined, 
-    },
-    include: includeRelations,
-  });
-};
-
-export const deleteAttendance = async (id) => {
-  await getAttendanceById(id);
-  await prisma.attendanceRecord.delete({ where: { id } });
+export const deleteAttendance = async (id, companyId) => {
+  await getAttendanceById(id, companyId);
+  return prisma.attendanceRecord.delete({ where: { id } });
 };
