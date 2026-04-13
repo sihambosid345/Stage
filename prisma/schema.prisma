@@ -244,12 +244,12 @@ model User {
   companyId      String
   firstName      String
   lastName       String
-  fullName       String?                      // ✅ ajouté
+  fullName       String?                      
   email          String
   phone          String?
   passwordHash   String
   role           String
-  permissions    String[]        @default([]) // ✅ ajouté
+  permissions    String[]        @default([]) 
   status         UserStatus      @default(ACTIVE)
   lastLoginAt    DateTime?
   createdAt      DateTime        @default(now())
