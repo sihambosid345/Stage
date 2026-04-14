@@ -1,10 +1,12 @@
+import "dotenv/config";
 import express    from "express";
 import cors       from "cors";
-import dotenv     from "dotenv";
 import { Router } from "express";
 
 import authRoutes                    from "./routes/authRoutes.js";
-import { authenticate, requireAdmin } from "./middlewares/authenticate.js";
+import superAdminRoutes             from "./routes/superAdminRoutes.js";
+import { authenticate, requireAdmin, requireSuperAdmin } from "./middlewares/authenticate.js";
+import { licenseMiddleware }       from "./middlewares/licenseMiddleware.js";
 
 import * as companyCtrl    from "./controllers/companyController.js";
 import * as userCtrl       from "./controllers/userController.js";
@@ -20,8 +22,7 @@ import * as payslipCtrl    from "./controllers/payslipController.js";
 import * as variableCtrl   from "./controllers/variableItemController.js";
 import * as licenseCtrl    from "./controllers/licenseController.js";
 
-dotenv.config();
-
+console.log("JWT_SECRET =", process.env.JWT_SECRET);
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
@@ -33,6 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/auth", authRoutes);
+app.use("/super-admin", superAdminRoutes);
 
 // ─── Protected ───────────────────────────────────────────────────────────────
 
@@ -40,14 +42,15 @@ const api = Router();
 // Authentification requise pour toutes les routes protégées
 // requireAdmin s'applique seulement sur les routes sensibles (users, companies, licenses)
 api.use(authenticate);
+api.use(licenseMiddleware);
 
-// Companies — admin only (full list)
-api.post  ("/companies",     requireAdmin, companyCtrl.createCompany);
-api.get   ("/companies",     requireAdmin, companyCtrl.getCompanies);
+// Companies — super admin only for global company management
+api.post  ("/companies",     requireSuperAdmin, companyCtrl.createCompany);
+api.get   ("/companies",     requireSuperAdmin, companyCtrl.getCompanies);
 api.get   ("/companies/mine", companyCtrl.getMyCompany);
-api.get   ("/companies/:id", requireAdmin, companyCtrl.getCompany);
-api.put   ("/companies/:id", requireAdmin, companyCtrl.updateCompany);
-api.delete("/companies/:id", requireAdmin, companyCtrl.deleteCompany);
+api.get   ("/companies/:id", companyCtrl.getCompany);
+api.put   ("/companies/:id", requireSuperAdmin, companyCtrl.updateCompany);
+api.delete("/companies/:id", requireSuperAdmin, companyCtrl.deleteCompany);
 
 // Users — admin only
 api.post  ("/users",     requireAdmin, userCtrl.createUser);
@@ -134,13 +137,13 @@ api.get   ("/variable-items/employee/:employeeId",variableCtrl.getVariableItemsB
 api.put   ("/variable-items/:id",                 variableCtrl.updateVariableItem);
 api.delete("/variable-items/:id",                 variableCtrl.deleteVariableItem);
 
-// Licenses — admin only
-api.post  ("/licenses",                           requireAdmin, licenseCtrl.createLicense);
-api.get   ("/licenses",                           requireAdmin, licenseCtrl.getLicenses);
-api.get   ("/licenses/:id",                       requireAdmin, licenseCtrl.getLicense);
+// Licenses — gestion par super admin uniquement, lecture possible pour admins sur leur entreprise
+api.post  ("/licenses",                           requireSuperAdmin, licenseCtrl.createLicense);
+api.get   ("/licenses",                           requireSuperAdmin, licenseCtrl.getLicenses);
+api.get   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.getLicense);
 api.get   ("/licenses/company/:companyId",        requireAdmin, licenseCtrl.getLicenseByCompany);
-api.put   ("/licenses/:id",                       requireAdmin, licenseCtrl.updateLicense);
-api.delete("/licenses/:id",                       requireAdmin, licenseCtrl.deleteLicense);
+api.put   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.updateLicense);
+api.delete("/licenses/:id",                       requireSuperAdmin, licenseCtrl.deleteLicense);
 
 app.use(api);
 

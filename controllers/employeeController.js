@@ -1,8 +1,10 @@
 import * as employeeService from "../services/employeeService.js";
+import * as licenseService from "../services/licenseService.js";
 
 export const createEmployee = async (req, res) => {
   try {
     const data = { ...req.body, companyId: req.user.companyId };
+    await licenseService.enforceLicenseLimit(req.user.companyId, "employees");
     const employee = await employeeService.createEmployee(data);
     res.status(201).json(employee);
   } catch (error) {

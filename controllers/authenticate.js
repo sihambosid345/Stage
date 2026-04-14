@@ -22,15 +22,16 @@ export const authenticate = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
-        id:        true,
-        companyId: true,
-        firstName: true,
-        lastName:  true,
-        email:     true,
-        role:      true,
+        id:          true,
+        companyId:   true,
+        firstName:   true,
+        lastName:    true,
+        email:       true,
+        role:        true,
+        isSuperAdmin: true,
         permissions: true,
-        status:    true,
-        company:   { select: { id: true, name: true, status: true } },
+        status:      true,
+        company:     { select: { id: true, name: true, status: true } },
       },
     });
 

@@ -22,14 +22,16 @@ export const authenticate = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
-        id:        true,
-        companyId: true,
-        firstName: true,
-        lastName:  true,
-        email:     true,
-        role:      true,
-        status:    true,
-        company:   { select: { id: true, name: true, status: true } },
+        id:          true,
+        companyId:   true,
+        firstName:   true,
+        lastName:    true,
+        email:       true,
+        role:        true,
+        isSuperAdmin: true,
+        permissions: true,
+        status:      true,
+        company:     { select: { id: true, name: true, status: true } },
       },
     });
 
@@ -56,8 +58,18 @@ export const requireAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: "Non authentifié." });
   }
-  if (req.user.role !== "ADMIN") {
+  if (req.user.role !== "ADMIN" && !req.user.isSuperAdmin) {
     return res.status(403).json({ error: "Accès refusé. Rôle ADMIN requis." });
+  }
+  next();
+};
+
+export const requireSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Non authentifié." });
+  }
+  if (!req.user.isSuperAdmin) {
+    return res.status(403).json({ error: "Accès refusé. Rôle SUPER_ADMIN requis." });
   }
   next();
 };
@@ -72,8 +84,22 @@ export const requireSameCompany = (companyIdExtractor) => (req, res, next) => {
     ? companyIdExtractor(req)
     : req.params.companyId || req.body.companyId;
 
-  if (companyId && req.user.companyId !== companyId) {
+  if (companyId && req.user.companyId !== companyId && !req.user.isSuperAdmin) {
     return res.status(403).json({ error: "Accès refusé à cette entreprise." });
+  }
+  next();
+};
+
+/**
+ * Middleware — bloque l'accès aux licenses pour les super admins et admins d'entreprise.
+ * Les licences ne peuvent être gérées que par les utilisateurs non-admins.
+ */
+export const blockAdminsFromLicenses = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Non authentifié." });
+  }
+  if (req.user.isSuperAdmin || req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN") {
+    return res.status(403).json({ error: "Accès refusé. Les admins ne peuvent pas gérer les licenses." });
   }
   next();
 };

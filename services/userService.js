@@ -48,16 +48,21 @@ export const createUser = async (data) => {
   });
 };
 
-export const getUsers = async () =>
-  prisma.user.findMany({ select: PUBLIC_SELECT, orderBy: { createdAt: "desc" } });
+export const getUsers = async (companyId) =>
+  prisma.user.findMany({
+    where: companyId ? { companyId, isSuperAdmin: false } : {},
+    select: PUBLIC_SELECT,
+    orderBy: { createdAt: "desc" },
+  });
 
-export const getUserById = async (id) => {
-  const user = await prisma.user.findUnique({ where: { id }, select: PUBLIC_SELECT });
+export const getUserById = async (id, companyId) => {
+  const where = companyId ? { id, companyId, isSuperAdmin: false } : { id };
+  const user = await prisma.user.findFirst({ where, select: PUBLIC_SELECT });
   if (!user) notFound();
   return user;
 };
 
-export const updateUser = async (id, data) => {
+export const updateUser = async (id, data, companyId) => {
   const { password, permissions, ...rest } = data;
 
   const updateData = { ...rest };
@@ -69,15 +74,20 @@ export const updateUser = async (id, data) => {
     updateData.passwordHash = await hashPassword(password);
   }
 
+  const existing = await prisma.user.findFirst({ where: companyId ? { id, companyId } : { id } });
+  if (!existing) notFound();
+
   const user = await prisma.user.update({
     where: { id },
     data: updateData,
     select: PUBLIC_SELECT,
-  }).catch(() => notFound());
+  });
 
   return user;
 };
 
-export const deleteUser = async (id) => {
-  await prisma.user.delete({ where: { id } }).catch(() => notFound());
+export const deleteUser = async (id, companyId) => {
+  const existing = await prisma.user.findFirst({ where: companyId ? { id, companyId } : { id } });
+  if (!existing) notFound();
+  await prisma.user.delete({ where: { id } });
 };

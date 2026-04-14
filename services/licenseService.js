@@ -45,6 +45,61 @@ export const getLicenseByCompany = async (companyId) => {
   return license;
 };
 
+export const getActiveLicenseByCompany = async (companyId) => {
+  const license = await prisma.license.findUnique({
+    where: { companyId },
+    select: {
+      id: true,
+      status: true,
+      endsAt: true,
+      maxUsers: true,
+      maxEmployees: true,
+    },
+  });
+  if (!license) throw { status: 403, message: "Company has no valid license" };
+
+  const now = new Date();
+  const isExpired = license.endsAt && license.endsAt < now;
+  const isInvalidStatus = !["ACTIVE", "TRIAL"].includes(license.status);
+  if (isExpired || isInvalidStatus) {
+    throw { status: 403, message: "License is expired or inactive" };
+  }
+
+  return license;
+};
+
+const countCompanyUsers = async (companyId) =>
+  prisma.user.count({ where: { companyId, isSuperAdmin: false } });
+
+const countCompanyEmployees = async (companyId) =>
+  prisma.employee.count({ where: { companyId } });
+
+export const enforceLicenseLimit = async (companyId, type) => {
+  const license = await getActiveLicenseByCompany(companyId);
+
+  if (type === "users" && typeof license.maxUsers === "number") {
+    const currentUsers = await countCompanyUsers(companyId);
+    if (currentUsers >= license.maxUsers) {
+      throw {
+        status: 403,
+        message: `La limite de ${license.maxUsers} utilisateurs a été atteinte pour cette licence.`,
+      };
+    }
+  }
+
+  if (type === "employees" && typeof license.maxEmployees === "number") {
+    const currentEmployees = await countCompanyEmployees(companyId);
+    if (currentEmployees >= license.maxEmployees) {
+      throw {
+        status: 403,
+        message: `La limite de ${license.maxEmployees} employés a été atteinte pour cette licence.`,
+      };
+    }
+  }
+
+  return true;
+};
+
 export const updateLicense = async (id, data) => {
   await getLicenseById(id);
   return await prisma.license.update({

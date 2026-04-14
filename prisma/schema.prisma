@@ -19,6 +19,15 @@ enum UserStatus {
   BLOCKED
 }
 
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  HR_MANAGER
+  PAYROLL_MANAGER
+  EMPLOYEE
+  VIEWER
+}
+
 enum EmployeeStatus {
   ACTIVE
   INACTIVE
@@ -241,21 +250,22 @@ model Position {
 
 model User {
   id             String          @id @default(uuid())
-  companyId      String
+  companyId      String?         // nullable pour les super admins
   firstName      String
   lastName       String
   fullName       String?                      
-  email          String
+  email          String          @unique
   phone          String?
   passwordHash   String
-  role           String
+  role           UserRole        @default(EMPLOYEE)
   permissions    String[]        @default([]) 
   status         UserStatus      @default(ACTIVE)
+  isSuperAdmin   Boolean         @default(false)
   lastLoginAt    DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company        Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdPeriods PayrollPeriod[] @relation("PayrollPeriodCreatedBy")
   createdRuns    PayrollRun[]    @relation("PayrollRunCreatedBy")
   approvedRuns   PayrollRun[]    @relation("PayrollRunApprovedBy")
@@ -263,7 +273,8 @@ model User {
   auditLogs      AuditLog[]
 
   @@unique([companyId, email])
-  @@index([companyId, role, status])
+  @@index([role, status])
+  @@index([isSuperAdmin])
   @@map("users")
 }
 
@@ -273,7 +284,7 @@ model Employee {
   employeeCode      String?
   firstName         String
   lastName          String
-  fullName          String?                    // ✅ ajouté
+  fullName          String?                   
   cin               String?
   cnssNumber        String?
   matricule         String?

@@ -3,7 +3,10 @@ export const createCompany = async (data) => {
   return await prisma.company.create({ data });
 };
 
-export const getCompanies = async () => {
+export const getCompanies = async (companyId) => {
+  if (companyId) {
+    return await prisma.company.findMany({ where: { id: companyId } });
+  }
   return await prisma.company.findMany();
 };
 

@@ -7,6 +7,30 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "8h";
 
 if (!JWT_SECRET) throw new Error("JWT_SECRET manquant dans .env");
 
+const validateCompanyAccess = async (user) => {
+  if (user.isSuperAdmin) return;
+  if (!user.companyId) {
+    const err = new Error("Utilisateur sans entreprise associée.");
+    err.status = 403; throw err;
+  }
+
+  if (!user.company || user.company.status !== "ACTIVE") {
+    const err = new Error("Entreprise inactive. Contactez le super administrateur.");
+    err.status = 403; throw err;
+  }
+
+  const license = await prisma.license.findUnique({
+    where: { companyId: user.companyId },
+    select: { status: true, endsAt: true },
+  });
+
+  const now = new Date();
+  if (!license || !["ACTIVE", "TRIAL"].includes(license.status) || (license.endsAt && license.endsAt < now)) {
+    const err = new Error("Licence expirée ou inactive. Contactez le super administrateur.");
+    err.status = 403; throw err;
+  }
+};
+
 export const login = async ({ email, password }) => {
   if (!email || !password) {
     const err = new Error("Email et mot de passe requis.");
@@ -19,7 +43,7 @@ export const login = async ({ email, password }) => {
     select: {
       id: true, companyId: true, firstName: true, lastName: true,
       fullName: true, email: true, phone: true, role: true,
-      permissions: true,
+      isSuperAdmin: true, permissions: true,
       status: true, passwordHash: true, lastLoginAt: true,
       company: { select: { id: true, name: true, status: true } },
     },
@@ -37,10 +61,19 @@ export const login = async ({ email, password }) => {
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) { const e = new Error(INVALID); e.status = 401; throw e; }
 
+  await validateCompanyAccess(user);
+
   prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
 
   const token = jwt.sign(
-    { sub: user.id, companyId: user.companyId, email: user.email, role: user.role },
+    { 
+      sub: user.id,
+      companyId: user.companyId,
+      email: user.email,
+      role: user.role,
+      isSuperAdmin: user.isSuperAdmin,
+      permissions: user.permissions,
+    },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
