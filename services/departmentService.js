@@ -4,10 +4,11 @@ export const createDepartment = async (data) =>
   prisma.department.create({ data });
 
 export const getDepartments = async (companyId) =>
-  prisma.department.findMany({ where: { companyId }, orderBy: { name: "asc" } });
+  prisma.department.findMany({ where: companyId ? { companyId } : {}, orderBy: { name: "asc" } });
 
 export const getDepartmentById = async (id, companyId) => {
-  const d = await prisma.department.findFirst({ where: { id, companyId } });
+  const where = companyId ? { id, companyId } : { id };
+  const d = await prisma.department.findFirst({ where });
   if (!d) throw { status: 404, message: "Department not found" };
   return d;
 };

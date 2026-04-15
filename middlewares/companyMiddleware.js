@@ -11,7 +11,7 @@ export const companyMiddleware = async (req, res, next) => {
     const companyId = req.params.companyId || req.body?.companyId;
 
     // Les super admins peuvent accéder à toutes les entreprises
-    if (req.user?.isSuperAdmin) {
+    if (req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN') {
       return next();
     }
 

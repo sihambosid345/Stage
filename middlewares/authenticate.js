@@ -58,7 +58,7 @@ export const requireAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: "Non authentifié." });
   }
-  if (req.user.role !== "ADMIN" && !req.user.isSuperAdmin) {
+  if (req.user.role !== "ADMIN" && req.user.role !== "SUPER_ADMIN" && !req.user.isSuperAdmin) {
     return res.status(403).json({ error: "Accès refusé. Rôle ADMIN requis." });
   }
   next();
@@ -68,7 +68,7 @@ export const requireSuperAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: "Non authentifié." });
   }
-  if (!req.user.isSuperAdmin) {
+  if (!req.user.isSuperAdmin && req.user.role !== "SUPER_ADMIN") {
     return res.status(403).json({ error: "Accès refusé. Rôle SUPER_ADMIN requis." });
   }
   next();
@@ -84,7 +84,7 @@ export const requireSameCompany = (companyIdExtractor) => (req, res, next) => {
     ? companyIdExtractor(req)
     : req.params.companyId || req.body.companyId;
 
-  if (companyId && req.user.companyId !== companyId && !req.user.isSuperAdmin) {
+  if (companyId && req.user.companyId !== companyId && !(req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN')) {
     return res.status(403).json({ error: "Accès refusé à cette entreprise." });
   }
   next();

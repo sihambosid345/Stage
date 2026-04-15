@@ -8,7 +8,7 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "8h";
 if (!JWT_SECRET) throw new Error("JWT_SECRET manquant dans .env");
 
 const validateCompanyAccess = async (user) => {
-  if (user.isSuperAdmin) return;
+  if (user.isSuperAdmin || user.role === 'SUPER_ADMIN') return;
   if (!user.companyId) {
     const err = new Error("Utilisateur sans entreprise associée.");
     err.status = 403; throw err;
@@ -32,6 +32,8 @@ const validateCompanyAccess = async (user) => {
 };
 
 export const login = async ({ email, password }) => {
+  console.log('[AUTH] Login attempt - email:', email);
+  
   if (!email || !password) {
     const err = new Error("Email et mot de passe requis.");
     err.status = 400;
@@ -49,6 +51,8 @@ export const login = async ({ email, password }) => {
     },
   });
 
+  console.log('[AUTH] User found:', !!user, user?.email, user?.status);
+
   const INVALID = "Email ou mot de passe incorrect.";
 
   if (!user) { const e = new Error(INVALID); e.status = 401; throw e; }
@@ -59,6 +63,7 @@ export const login = async ({ email, password }) => {
   }
 
   const valid = await bcrypt.compare(password, user.passwordHash);
+  console.log('[AUTH] Password valid:', valid);
   if (!valid) { const e = new Error(INVALID); e.status = 401; throw e; }
 
   await validateCompanyAccess(user);

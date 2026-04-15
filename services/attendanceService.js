@@ -9,10 +9,11 @@ export const createAttendance = async (data) =>
   prisma.attendanceRecord.create({ data, include });
 
 export const getAttendances = async (companyId) =>
-  prisma.attendanceRecord.findMany({ where: { companyId }, include, orderBy: { date: "desc" } });
+  prisma.attendanceRecord.findMany({ where: companyId ? { companyId } : {}, include, orderBy: { date: "desc" } });
 
 export const getAttendanceById = async (id, companyId) => {
-  const r = await prisma.attendanceRecord.findFirst({ where: { id, companyId }, include });
+  const where = companyId ? { id, companyId } : { id };
+  const r = await prisma.attendanceRecord.findFirst({ where, include });
   if (!r) throw { status: 404, message: "Attendance record not found" };
   return r;
 };

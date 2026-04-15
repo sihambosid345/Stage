@@ -65,7 +65,7 @@ export const createCompany = async (req, res) => {
       req.body;
 
     // Vérifier que c'est un super admin
-    if (!req.user?.isSuperAdmin) {
+    if (!(req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN')) {
       return res.status(403).json({ error: "Only super admins can create companies" });
     }
 
@@ -107,7 +107,7 @@ export const createCompanyAdmin = async (req, res) => {
     const { companyId, firstName, lastName, email, password, phone } = req.body;
 
     // Vérifier que c'est un super admin
-    if (!req.user?.isSuperAdmin) {
+    if (!(req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN')) {
       return res.status(403).json({ error: "Only super admins can create company admins" });
     }
 
@@ -190,7 +190,7 @@ export const createLicense = async (req, res) => {
       req.body;
 
     // Vérifier que c'est un super admin
-    if (!req.user?.isSuperAdmin) {
+    if (!(req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN')) {
       return res.status(403).json({ error: "Only super admins can manage licenses" });
     }
 
@@ -277,7 +277,7 @@ export const createLicense = async (req, res) => {
 export const getAllCompanies = async (req, res) => {
   try {
     // Vérifier que c'est un super admin
-    if (!req.user?.isSuperAdmin) {
+    if (!(req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN')) {
       return res.status(403).json({ error: "Only super admins can view all companies" });
     }
 

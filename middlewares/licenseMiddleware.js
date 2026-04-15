@@ -10,7 +10,7 @@ export const licenseMiddleware = async (req, res, next) => {
     const userId = req.user?.id;
     
     // Les super admins n'ont pas besoin de vérifier la licence
-    if (req.user?.isSuperAdmin) {
+    if (req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN') {
       return next();
     }
 

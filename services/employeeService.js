@@ -17,14 +17,15 @@ export const createEmployee = async (data) =>
 
 export const getEmployees = async (companyId) =>
   prisma.employee.findMany({
-    where: { companyId },
+    where: companyId ? { companyId } : {},
     include: includeRelations,
     orderBy: { createdAt: "desc" },
   });
 
 export const getEmployeeById = async (id, companyId) => {
+  const where = companyId ? { id, companyId } : { id };
   const employee = await prisma.employee.findFirst({
-    where: { id, companyId },
+    where,
     include: includeRelations,
   });
   if (!employee) throw { status: 404, message: "Employee not found" };

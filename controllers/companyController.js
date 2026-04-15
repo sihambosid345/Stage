@@ -6,7 +6,7 @@ export const createCompany = async (req, res) => {
 };
 export const getCompanies = async (req, res) => {
   try {
-    const companyId = req.user.isSuperAdmin ? undefined : req.user.companyId;
+    const companyId = (req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN') ? undefined : req.user.companyId;
     res.json(await companyService.getCompanies(companyId));
   }
   catch (error) { res.status(500).json({ error: error.message }); }
@@ -20,7 +20,7 @@ export const getMyCompany = async (req, res) => {
 };
 export const getCompany = async (req, res) => {
   try {
-    if (!req.user.isSuperAdmin && req.user.companyId !== req.params.id) {
+    if (!(req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN') && req.user.companyId !== req.params.id) {
       return res.status(403).json({ error: "Accès refusé à cette entreprise." });
     }
     res.json(await companyService.getCompanyById(req.params.id));
