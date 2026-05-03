@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Contrat - {{employee.firstName}} {{employee.lastName}}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', serif; color: #1a1a2e; font-size: 13px; line-height: 1.6; }
+
+  .header {
+    background: #1a1a2e;
+    color: white;
+    padding: 30px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .company-name { font-size: 22px; font-weight: bold; letter-spacing: 2px; }
+  .doc-title { font-size: 14px; opacity: 0.7; text-align: right; }
+  .doc-ref { font-size: 18px; font-weight: bold; }
+
+  .body { padding: 40px; }
+  .section { margin-bottom: 30px; }
+  .section-title {
+    font-size: 11px; font-weight: bold; letter-spacing: 3px;
+    text-transform: uppercase; color: #6b7280;
+    border-bottom: 2px solid #6b7280; padding-bottom: 6px; margin-bottom: 16px;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .field { margin-bottom: 12px; }
+  .field-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 3px; }
+  .field-value { font-size: 13px; font-weight: 600; color: #1a1a2e; padding: 8px 0; border-bottom: 1px solid #eee; }
+
+  .intro-text {
+    background: #f3f4f6; border-left: 4px solid #6b7280;
+    padding: 16px 20px; border-radius: 0 8px 8px 0;
+    margin-bottom: 24px; font-style: italic; color: #444;
+  }
+
+  .article { margin-bottom: 20px; }
+  .article-title { font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; color: #1a1a2e; }
+  .article-body { color: #444; font-size: 12px; }
+
+  .signature-section {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 60px;
+    margin-top: 50px; padding-top: 30px; border-top: 1px solid #ddd;
+  }
+  .signature-box { text-align: center; }
+  .signature-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; }
+  .signature-name { font-weight: bold; font-size: 13px; margin-bottom: 50px; }
+  .signature-line { border-bottom: 1px solid #1a1a2e; margin: 0 20px; }
+  .signature-caption { font-size: 10px; color: #888; margin-top: 4px; }
+
+  .footer {
+    background: #f5f5f5; padding: 16px 40px;
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: #888; margin-top: 30px;
+  }
+
+  .badge {
+    display: inline-block; padding: 4px 12px;
+    border-radius: 20px; font-size: 11px; font-weight: bold;
+    background: #e5e7eb; color: #374151;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="company-name">{{company.name}}</div>
+    <div style="font-size:11px; opacity:0.6; margin-top:4px;">{{company.address}}</div>
+  </div>
+  <div class="doc-title">
+    <div>CONTRAT DE TRAVAIL</div>
+    <div class="doc-ref">#{{contract.id}}</div>
+    <div style="font-size:11px; opacity:0.7; margin-top:4px;">Émis le {{formatDate contract.startDate}}</div>
+  </div>
+</div>
+
+<div class="body">
+  <div class="intro-text">
+    Entre <strong>{{company.name}}</strong> et <strong>{{employee.firstName}} {{employee.lastName}}</strong>,
+    un contrat a été établi selon les modalités suivantes.
+  </div>
+
+  <div class="section">
+    <div class="section-title">Informations générales</div>
+    <div class="grid-2">
+      <div class="field">
+        <div class="field-label">Type</div>
+        <div class="field-value"><span class="badge">{{contract.type}}</span></div>
+      </div>
+      <div class="field">
+        <div class="field-label">Statut</div>
+        <div class="field-value">{{contract.status}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Date début</div>
+        <div class="field-value">{{formatDate contract.startDate}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Rémunération</div>
+        <div class="field-value">{{formatMoney contract.baseSalary}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Informations employé</div>
+    <div class="grid-2">
+      <div class="field">
+        <div class="field-label">Nom complet</div>
+        <div class="field-value">{{employee.firstName}} {{employee.lastName}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Email</div>
+        <div class="field-value">{{employee.email}}</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Téléphone</div>
+        <div class="field-value">{{employee.phone}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="signature-section">
+    <div class="signature-box">
+      <div class="signature-label">L'Employeur</div>
+      <div class="signature-name">{{company.name}}</div>
+      <div class="signature-line"></div>
+    </div>
+    <div class="signature-box">
+      <div class="signature-label">L'Employé</div>
+      <div class="signature-name">{{employee.firstName}} {{employee.lastName}}</div>
+      <div class="signature-line"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>{{company.name}}</span>
+  <span>{{contract.type}} #{{contract.id}} — {{today}}</span>
+</div>
+
+</body>
+</html>

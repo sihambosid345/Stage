@@ -2,6 +2,11 @@ import "dotenv/config";
 import express    from "express";
 import cors       from "cors";
 import { Router } from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import authRoutes                    from "./routes/authRoutes.js";
 import superAdminRoutes             from "./routes/superAdminRoutes.js";
@@ -15,13 +20,8 @@ import * as positionCtrl   from "./controllers/positionController.js";
 import * as employeeCtrl   from "./controllers/employeeController.js";
 import * as contractCtrl   from "./controllers/employeeContractController.js";
 import * as attendanceCtrl from "./controllers/attendanceController.js";
-import * as periodCtrl     from "./controllers/payrollPeriodController.js";
-import * as runCtrl        from "./controllers/payrollRunController.js";
-import * as itemCtrl       from "./controllers/payrollItemController.js";
-import * as payslipCtrl    from "./controllers/payslipController.js";
 import * as variableCtrl   from "./controllers/variableItemController.js";
 import * as licenseCtrl    from "./controllers/licenseController.js";
-
 console.log("JWT_SECRET =", process.env.JWT_SECRET);
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +29,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:4200", credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files (for PDFs and other uploads)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 
@@ -45,12 +48,13 @@ api.use(authenticate);
 api.use(licenseMiddleware);
 
 // Companies — super admin only for global company management
-api.post  ("/companies",     requireSuperAdmin, companyCtrl.createCompany);
-api.get   ("/companies",     requireSuperAdmin, companyCtrl.getCompanies);
-api.get   ("/companies/mine", companyCtrl.getMyCompany);
-api.get   ("/companies/:id", companyCtrl.getCompany);
-api.put   ("/companies/:id", requireSuperAdmin, companyCtrl.updateCompany);
-api.delete("/companies/:id", requireSuperAdmin, companyCtrl.deleteCompany);
+// IMPORTANT: /companies/mine doit être AVANT /companies/:id pour éviter le conflit de route
+api.post  ("/companies",      requireSuperAdmin, companyCtrl.createCompany);
+api.get   ("/companies/mine", companyCtrl.getMyCompany);  // ← avant /:id
+api.get   ("/companies",      requireSuperAdmin, companyCtrl.getCompanies);
+api.get   ("/companies/:id",  companyCtrl.getCompany);
+api.put   ("/companies/:id",  companyCtrl.updateCompany);
+api.delete("/companies/:id",  requireSuperAdmin, companyCtrl.deleteCompany);
 
 // Users — admin only
 api.post  ("/users",     requireAdmin, userCtrl.createUser);
@@ -63,6 +67,7 @@ api.delete("/users/:id", requireAdmin, userCtrl.deleteUser);
 api.post  ("/departments",     departmentCtrl.createDepartment);
 api.get   ("/departments",     departmentCtrl.getDepartments);
 api.get   ("/departments/:id", departmentCtrl.getDepartment);
+api.get("/departments/company/:companyId", departmentCtrl.getDepartmentsByCompany);
 api.put   ("/departments/:id", departmentCtrl.updateDepartment);
 api.delete("/departments/:id", departmentCtrl.deleteDepartment);
 
@@ -70,6 +75,7 @@ api.delete("/departments/:id", departmentCtrl.deleteDepartment);
 api.post  ("/positions",     positionCtrl.createPosition);
 api.get   ("/positions",     positionCtrl.getPositions);
 api.get   ("/positions/:id", positionCtrl.getPosition);
+api.get("/positions/department/:departmentId", positionCtrl.getPositionsByDepartment);
 api.put   ("/positions/:id", positionCtrl.updatePosition);
 api.delete("/positions/:id", positionCtrl.deletePosition);
 
@@ -77,12 +83,15 @@ api.delete("/positions/:id", positionCtrl.deletePosition);
 api.post  ("/employees",     employeeCtrl.createEmployee);
 api.get   ("/employees",     employeeCtrl.getEmployees);
 api.get   ("/employees/:id", employeeCtrl.getEmployee);
+api.get("/employees/position/:positionId", employeeCtrl.getEmployeesByPosition);
 api.put   ("/employees/:id", employeeCtrl.updateEmployee);
 api.delete("/employees/:id", employeeCtrl.deleteEmployee);
 
 // Contracts
 api.post  ("/contracts",                            contractCtrl.createContract);
 api.get   ("/contracts",                            contractCtrl.getContracts);
+api.post  ("/contracts/:id/generate-pdf",           contractCtrl.generateContractPdf);
+api.get   ("/contracts/pdf/:filename",              contractCtrl.downloadContractPdf);
 api.get   ("/contracts/:id",                        contractCtrl.getContract);
 api.get   ("/contracts/employee/:employeeId",       contractCtrl.getContractsByEmployee);
 api.put   ("/contracts/:id",                        contractCtrl.updateContract);
@@ -95,39 +104,6 @@ api.get   ("/attendances/:id",                      attendanceCtrl.getAttendance
 api.get   ("/attendances/employee/:employeeId",     attendanceCtrl.getAttendanceByEmployee);
 api.put   ("/attendances/:id",                      attendanceCtrl.updateAttendance);
 api.delete("/attendances/:id",                      attendanceCtrl.deleteAttendance);
-
-// Payroll Periods
-api.post  ("/payroll-periods",     periodCtrl.createPeriod);
-api.get   ("/payroll-periods",     periodCtrl.getPeriods);
-api.get   ("/payroll-periods/:id", periodCtrl.getPeriod);
-api.put   ("/payroll-periods/:id", periodCtrl.updatePeriod);
-api.delete("/payroll-periods/:id", periodCtrl.deletePeriod);
-
-// Payroll Runs
-api.post  ("/payroll-runs",                       runCtrl.createRun);
-api.get   ("/payroll-runs",                       runCtrl.getRuns);
-api.get   ("/payroll-runs/:id",                   runCtrl.getRun);
-api.get   ("/payroll-runs/period/:periodId",      runCtrl.getRunsByPeriod);
-api.put   ("/payroll-runs/:id",                   runCtrl.updateRun);
-api.delete("/payroll-runs/:id",                   runCtrl.deleteRun);
-
-// Payroll Items
-api.post  ("/payroll-items",                      itemCtrl.createItem);
-api.get   ("/payroll-items",                      itemCtrl.getItems);
-api.get   ("/payroll-items/:id",                  itemCtrl.getItem);
-api.get   ("/payroll-items/run/:runId",           itemCtrl.getItemsByRun);
-api.get   ("/payroll-items/employee/:employeeId", itemCtrl.getItemsByEmployee);
-api.put   ("/payroll-items/:id",                  itemCtrl.updateItem);
-api.delete("/payroll-items/:id",                  itemCtrl.deleteItem);
-
-// Payslips
-api.post  ("/payslips",                           payslipCtrl.createPayslip);
-api.get   ("/payslips",                           payslipCtrl.getPayslips);
-api.get   ("/payslips/:id",                       payslipCtrl.getPayslip);
-api.get   ("/payslips/employee/:employeeId",      payslipCtrl.getPayslipsByEmployee);
-api.get   ("/payslips/period/:periodId",          payslipCtrl.getPayslipsByPeriod);
-api.put   ("/payslips/:id",                       payslipCtrl.updatePayslip);
-api.delete("/payslips/:id",                       payslipCtrl.deletePayslip);
 
 // Variable Items
 api.post  ("/variable-items",                     variableCtrl.createVariableItem);

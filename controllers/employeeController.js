@@ -33,6 +33,20 @@ export const getEmployees = async (req, res) => {
   }
 };
 
+export const getEmployeesByPosition = async (req, res) => {
+  try {
+    const { departmentId } = req.params;
+    console.log('📋 Fetching employees for position:', positionId);
+    
+    const employees = await employeeService.getEmployeesByPosition(positionId);
+    
+    console.log(`✅ Found ${positions.length} employees`);
+    res.json(employees);
+  } catch (error) {
+    console.error('Error getting employees by position:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
 export const getEmployee = async (req, res) => {
   try {
     const companyId = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN' ? undefined : req.user.companyId;

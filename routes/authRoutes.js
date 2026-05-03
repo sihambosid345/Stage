@@ -1,17 +1,24 @@
-// routes/authRoutes.js
-import { Router } from "express";
-import { loginController, logoutController, meController } from "../controllers/authController.js";
-import { authenticate } from "../middlewares/authenticate.js";
+import express from "express";
+import * as authController from "../controllers/authController.js";
 
-const router = Router();
+const router = express.Router();
 
-// POST /auth/login   — public
-router.post("/login", loginController);
+/**
+ * POST /auth/login
+ * Body: { email, password }
+ */
+router.post("/login", authController.loginController);
 
-// POST /auth/logout  — protégé (pour audit log éventuel)
-router.post("/logout", authenticate, logoutController);
+/**
+ * POST /auth/logout
+ * (Optionnel - stateless)
+ */
+router.post("/logout", authController.logoutController);
 
-// GET  /auth/me      — retourne l'utilisateur connecté
-router.get("/me", authenticate, meController);
+/**
+ * GET /auth/me
+ * Retourne l'utilisateur connecté
+ */
+router.get("/me", authController.meController);
 
 export default router;

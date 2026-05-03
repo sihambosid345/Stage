@@ -1,65 +1,63 @@
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+// CORRIGÉ: utilise l'instance prisma partagée au lieu de new PrismaClient()
+import { prisma } from "../lib/prisma.js";
 
 /**
- * Middleware pour vérifier la validité de la licence
- * Vérifie que l'entreprise a une licence active et valide
+ * Middleware pour vérifier la validité de la licence de l'entreprise.
+ * Ignoré pour les super admins.
+ * Auto-expire licenses when end date passes.
  */
 export const licenseMiddleware = async (req, res, next) => {
   try {
-    const userId = req.user?.id;
-    
-    // Les super admins n'ont pas besoin de vérifier la licence
-    if (req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN') {
+    // Super admins contournent la vérification de licence
+    if (req.user?.isSuperAdmin || req.user?.role === "SUPER_ADMIN") {
       return next();
     }
 
-    const companyId = req.params.companyId || req.body?.companyId || req.user?.companyId;
+    const companyId = req.user?.companyId;
 
     if (!companyId) {
-      return res.status(400).json({
-        error: "Company ID is required",
-      });
+      return res.status(400).json({ error: "Utilisateur sans entreprise associée." });
     }
 
-    // Vérifier que l'entreprise existe et a une licence valide
-    const license = await prisma.license.findUnique({
+    let license = await prisma.license.findUnique({
       where: { companyId },
-      select: {
-        id: true,
-        status: true,
-        endsAt: true,
-        maxUsers: true,
-        maxEmployees: true,
-      },
+      select: { id: true, status: true, endsAt: true, maxUsers: true, maxEmployees: true },
     });
 
-    // Si aucune licence trouvée
     if (!license) {
       return res.status(403).json({
-        error: "Company has no valid license",
+        error: "Cette entreprise ne possède pas de licence. Contactez le super administrateur.",
         licenseStatus: "NO_LICENSE",
       });
     }
 
-    // Vérifier le statut de la licence
     const now = new Date();
-    const isExpired = license.endsAt && license.endsAt < now;
+    const isExpired      = license.endsAt && license.endsAt < now;
+    
+    // Auto-update license status to EXPIRED if end date has passed
+    if (isExpired && license.status !== 'EXPIRED') {
+      license = await prisma.license.update({
+        where: { id: license.id },
+        data: { status: 'EXPIRED' },
+        select: { id: true, status: true, endsAt: true, maxUsers: true, maxEmployees: true },
+      });
+    }
+    
     const isInvalidStatus = !["ACTIVE", "TRIAL"].includes(license.status);
 
     if (isExpired || isInvalidStatus) {
       return res.status(403).json({
-        error: "License is expired or inactive",
+        error: "Votre licence est expirée ou inactive. Contactez le super administrateur.",
         licenseStatus: license.status,
         expiresAt: license.endsAt,
       });
     }
 
-    // Stocker les informations de licence dans la requête
+    // Rend les infos de licence disponibles pour les controllers
     req.license = license;
     next();
   } catch (error) {
     console.error("License middleware error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Erreur interne lors de la vérification de la licence." });
   }
 };

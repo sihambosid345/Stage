@@ -37,16 +37,33 @@ export const getLicenseById = async (id) => {
 };
 
 export const getLicenseByCompany = async (companyId) => {
-  const license = await prisma.license.findUnique({
+  let license = await prisma.license.findUnique({
     where: { companyId },
     include: includeRelations,
   });
   if (!license) throw { status: 404, message: "License not found for this company" };
+  
+  const now = new Date();
+  // Auto-expire license if end date has passed
+  if (license.endsAt && license.endsAt < now && license.status !== 'EXPIRED') {
+    license = await prisma.license.update({
+      where: { id: license.id },
+      data: { status: 'EXPIRED' },
+      include: includeRelations,
+    });
+    
+    // Also deactivate all users for this company
+    await prisma.user.updateMany({
+      where: { companyId, isSuperAdmin: false },
+      data: { status: 'BLOCKED' }
+    });
+  }
+  
   return license;
 };
 
 export const getActiveLicenseByCompany = async (companyId) => {
-  const license = await prisma.license.findUnique({
+  let license = await prisma.license.findUnique({
     where: { companyId },
     select: {
       id: true,
@@ -60,9 +77,31 @@ export const getActiveLicenseByCompany = async (companyId) => {
 
   const now = new Date();
   const isExpired = license.endsAt && license.endsAt < now;
+  
+  // Auto-update license status to EXPIRED if end date has passed
+  if (isExpired && license.status !== 'EXPIRED') {
+    license = await prisma.license.update({
+      where: { id: license.id },
+      data: { status: 'EXPIRED' },
+      select: {
+        id: true,
+        status: true,
+        endsAt: true,
+        maxUsers: true,
+        maxEmployees: true,
+      },
+    });
+    
+    // Also deactivate all users for this company
+    await prisma.user.updateMany({
+      where: { companyId, isSuperAdmin: false },
+      data: { status: 'BLOCKED' }
+    });
+  }
+  
   const isInvalidStatus = !["ACTIVE", "TRIAL"].includes(license.status);
   if (isExpired || isInvalidStatus) {
-    throw { status: 403, message: "License is expired or inactive" };
+    throw { status: 403, message: "License is expired or inactive. Access to the application has been blocked." };
   }
 
   return license;
