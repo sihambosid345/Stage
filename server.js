@@ -21,6 +21,11 @@ import * as positionCtrl   from "./controllers/positionController.js";
 import * as employeeCtrl   from "./controllers/employeeController.js";
 import * as contractCtrl   from "./controllers/employeeContractController.js";
 import * as attendanceCtrl from "./controllers/attendanceController.js";
+import * as configCtrl     from "./controllers/payrollConfigController.js";
+import * as periodCtrl     from "./controllers/payrollPeriodController.js";
+import * as runCtrl        from "./controllers/payrollRunController.js";
+import * as itemCtrl       from "./controllers/payrollItemController.js";
+import * as payslipCtrl    from "./controllers/payslipController.js";
 import * as variableCtrl   from "./controllers/variableItemController.js";
 import * as licenseCtrl    from "./controllers/licenseController.js";
 
@@ -117,6 +122,40 @@ api.get   ("/licenses/company/:companyId",        requireAdmin,      licenseCtrl
 api.get   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.getLicense);
 api.put   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.updateLicense);
 api.delete("/licenses/:id",                       requireSuperAdmin, licenseCtrl.deleteLicense);
+
+
+// Payroll Periods
+api.post  ("/payroll-periods",     periodCtrl.createPeriod);
+api.get   ("/payroll-periods",     periodCtrl.getPeriods);
+api.get   ("/payroll-periods/:id", periodCtrl.getPeriod);
+api.put   ("/payroll-periods/:id", periodCtrl.updatePeriod);
+api.delete("/payroll-periods/:id", periodCtrl.deletePeriod);
+
+// Payroll Runs
+api.post  ("/payroll-runs",                       runCtrl.createRun);
+api.get   ("/payroll-runs",                       runCtrl.getRuns);
+api.get   ("/payroll-runs/:id",                   runCtrl.getRun);
+api.get   ("/payroll-runs/period/:periodId",      runCtrl.getRunsByPeriod);
+api.put   ("/payroll-runs/:id",                   runCtrl.updateRun);
+api.delete("/payroll-runs/:id",                   runCtrl.deleteRun);
+
+// Payroll Items
+api.post  ("/payroll-items",                      itemCtrl.createItem);
+api.get   ("/payroll-items",                      itemCtrl.getItems);
+api.get   ("/payroll-items/:id",                  itemCtrl.getItem);
+api.get   ("/payroll-items/run/:runId",           itemCtrl.getItemsByRun);
+api.get   ("/payroll-items/employee/:employeeId", itemCtrl.getItemsByEmployee);
+api.put   ("/payroll-items/:id",                  itemCtrl.updateItem);
+api.delete("/payroll-items/:id",                  itemCtrl.deleteItem);
+
+// Payslips
+api.post  ("/payslips",                           payslipCtrl.createPayslip);
+api.get   ("/payslips",                           payslipCtrl.getPayslips);
+api.get   ("/payslips/:id",                       payslipCtrl.getPayslip);
+api.get   ("/payslips/employee/:employeeId",      payslipCtrl.getPayslipsByEmployee);
+api.get   ("/payslips/period/:periodId",          payslipCtrl.getPayslipsByPeriod);
+api.put   ("/payslips/:id",                       payslipCtrl.updatePayslip);
+api.delete("/payslips/:id",                       payslipCtrl.deletePayslip);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PAYROLL CONFIG
