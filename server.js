@@ -27,7 +27,9 @@ import * as runCtrl        from "./controllers/payrollRunController.js";
 import * as itemCtrl       from "./controllers/payrollItemController.js";
 import * as payslipCtrl    from "./controllers/payslipController.js";
 import * as variableCtrl   from "./controllers/variableItemController.js";
+import * as recurringCtrl  from "./controllers/employeeRecurringItemController.js";
 import * as licenseCtrl    from "./controllers/licenseController.js";
+import { monthlyHoursFromWeekly, STANDARD_WEEKLY_HOURS } from "./utils/payrollHours.js";
 
 const prisma = new PrismaClient();
 console.log("JWT_SECRET =", process.env.JWT_SECRET);
@@ -115,6 +117,14 @@ api.get   ("/variable-items/:id",                 variableCtrl.getVariableItem);
 api.put   ("/variable-items/:id",                 variableCtrl.updateVariableItem);
 api.delete("/variable-items/:id",                 variableCtrl.deleteVariableItem);
 
+// ── Recurring Items ───────────────────────────────────────────────────────────
+api.post  ("/recurring-items",                      recurringCtrl.createRecurringItem);
+api.get   ("/recurring-items",                      recurringCtrl.getRecurringItems);
+api.get   ("/recurring-items/employee/:employeeId", recurringCtrl.getRecurringItemsByEmployee);
+api.get   ("/recurring-items/:id",                  recurringCtrl.getRecurringItem);
+api.put   ("/recurring-items/:id",                  recurringCtrl.updateRecurringItem);
+api.delete("/recurring-items/:id",                  recurringCtrl.deleteRecurringItem);
+
 // ── Licenses ──────────────────────────────────────────────────────────────────
 api.post  ("/licenses",                           requireSuperAdmin, licenseCtrl.createLicense);
 api.get   ("/licenses",                           requireSuperAdmin, licenseCtrl.getLicenses);
@@ -129,6 +139,7 @@ api.post  ("/payroll-periods",     periodCtrl.createPeriod);
 api.get   ("/payroll-periods",     periodCtrl.getPeriods);
 api.get   ("/payroll-periods/:id", periodCtrl.getPeriod);
 api.put   ("/payroll-periods/:id", periodCtrl.updatePeriod);
+api.post  ("/payroll-periods/:id/close", periodCtrl.closePeriod);
 api.delete("/payroll-periods/:id", periodCtrl.deletePeriod);
 
 // Payroll Runs
@@ -162,6 +173,46 @@ api.delete("/payslips/:id",                       payslipCtrl.deletePayslip);
 // Ordre obligatoire : routes spécifiques AVANT /:id
 // ══════════════════════════════════════════════════════════════════════════════
 
+const getLicenseForCompany = async (companyId) => {
+  if (!companyId) return null;
+  return prisma.license.findUnique({
+    where: { companyId },
+    select: {
+      id: true,
+      payrollEnabled: true,
+      cnssEnabled: true,
+      taxEnabled: true,
+      damancomEnabled: true,
+      cimrEnabled: true,
+      availableRegimes: true,
+      status: true,
+      endsAt: true,
+    },
+  });
+};
+
+const applyLicenseToPayrollConfig = (config, license) => {
+  if (!config || !license) return config;
+  // Modules doivent venir de la licence (source de vérité)
+  const constrained = {
+    ...config,
+    cnssEnabled: !!license.cnssEnabled,
+    irEnabled: !!license.taxEnabled,
+    damancomEnabled: !!license.damancomEnabled,
+    cimrEnabled: !!license.cimrEnabled,
+  };
+  // AMO suit CNSS par défaut (peut être ajusté plus tard)
+  constrained.amoEnabled = !!license.cnssEnabled;
+
+  // Régime doit être disponible selon la licence
+  if (Array.isArray(license.availableRegimes) && license.availableRegimes.length > 0) {
+    if (!license.availableRegimes.includes(constrained.regime)) {
+      constrained.regime = license.availableRegimes[0];
+    }
+  }
+  return constrained;
+};
+
 // ── 1. GET /all — Super Admin : toutes les configs ────────────────────────────
 api.get("/payroll-config/all", requireSuperAdmin, async (req, res) => {
   try {
@@ -190,13 +241,27 @@ api.post("/payroll-config/upsert", requireAdmin, async (req, res) => {
       });
     }
 
+    const license = await getLicenseForCompany(companyId);
+    const incoming = { ...req.body };
+    const constrained = applyLicenseToPayrollConfig(incoming, license);
+
     const config = await prisma.payrollConfig.upsert({
       where:  { companyId },
-      update: req.body,
-      create: { companyId, ...req.body },
+      update: {
+        ...constrained,
+        version: { increment: 1 },
+        dateEffet: constrained.dateEffet ? new Date(constrained.dateEffet) : undefined,
+      },
+      create: {
+        companyId,
+        ...constrained,
+        version: 1,
+        createdById: req.user?.id,
+        dateEffet: constrained.dateEffet ? new Date(constrained.dateEffet) : new Date(),
+      },
       include: { company: { select: { id: true, name: true } } }
     });
-    res.json(config);
+    res.json(applyLicenseToPayrollConfig(config, license));
   } catch (error) {
     console.error("Erreur UPSERT /payroll-config:", error);
     res.status(400).json({ error: error.message });
@@ -222,6 +287,7 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
     }
 
     // Admin normal → config de son entreprise (créée si inexistante)
+    const license = await getLicenseForCompany(companyId);
     let config = await prisma.payrollConfig.findUnique({
       where: { companyId },
       include: { company: { select: { id: true, name: true } } }
@@ -234,12 +300,12 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
           companyId,
           regime:                  "MOROCCO_STANDARD",
           currency:                "MAD",
-          weeklyHours:             44,
-          monthlyHours:            191.33,
+          weeklyHours:             STANDARD_WEEKLY_HOURS,
+          monthlyHours:            monthlyHoursFromWeekly(STANDARD_WEEKLY_HOURS),
           workingDaysPerMonth:     26,
-          cnssEnabled:             true,
-          amoEnabled:              true,
-          irEnabled:               true,
+          cnssEnabled:             false,
+          amoEnabled:              false,
+          irEnabled:               false,
           cimrEnabled:             false,
           defaultCnssDeclaredDays: 26
         },
@@ -247,7 +313,23 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
       });
     }
 
-    res.json(config);
+    // Contrainte modules/régimes par licence
+    const constrained = applyLicenseToPayrollConfig(config, license);
+    // Cache en DB (best-effort) pour garder cohérence
+    if (license) {
+      await prisma.payrollConfig.update({
+        where: { id: config.id },
+        data: {
+          cnssEnabled: constrained.cnssEnabled,
+          amoEnabled: constrained.amoEnabled,
+          irEnabled: constrained.irEnabled,
+          damancomEnabled: constrained.damancomEnabled,
+          cimrEnabled: constrained.cimrEnabled,
+          regime: constrained.regime,
+        },
+      });
+    }
+    res.json(constrained);
   } catch (error) {
     console.error("Erreur GET /payroll-config:", error);
     res.status(500).json({ error: error.message });
@@ -297,15 +379,20 @@ api.post("/payroll-config", requireAdmin, async (req, res) => {
       });
     }
 
+    const license = await getLicenseForCompany(targetCompanyId);
+    const constrained = applyLicenseToPayrollConfig(configData, license);
     const config = await prisma.payrollConfig.create({
       data: { 
         companyId: targetCompanyId, 
-        ...configData 
+        ...constrained,
+        version: 1,
+        createdById: req.user?.id,
+        dateEffet: constrained.dateEffet ? new Date(constrained.dateEffet) : new Date(),
       },
       include: { company: { select: { id: true, name: true } } }
     });
     
-    res.status(201).json(config);
+    res.status(201).json(applyLicenseToPayrollConfig(config, license));
   } catch (error) {
     console.error("Erreur POST /payroll-config:", error);
     res.status(400).json({ error: error.message });
@@ -326,12 +413,19 @@ api.put("/payroll-config", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Configuration non trouvée" });
     }
 
+    const license = await getLicenseForCompany(companyId);
+    const constrained = applyLicenseToPayrollConfig(req.body, license);
+
     const config = await prisma.payrollConfig.update({
       where: { id: existing.id },
-      data: req.body,
+      data: {
+        ...constrained,
+        version: { increment: 1 },
+        dateEffet: constrained.dateEffet ? new Date(constrained.dateEffet) : undefined,
+      },
       include: { company: { select: { id: true, name: true } } }
     });
-    res.json(config);
+    res.json(applyLicenseToPayrollConfig(config, license));
   } catch (error) {
     console.error("Erreur PUT /payroll-config:", error);
     res.status(400).json({ error: error.message });
@@ -361,12 +455,19 @@ api.put("/payroll-config/:id", requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     console.log("PUT /payroll-config/:id - id:", id);
+    const existing = await prisma.payrollConfig.findUnique({ where: { id }, select: { companyId: true } });
+    const license = existing?.companyId ? await getLicenseForCompany(existing.companyId) : null;
+    const constrained = applyLicenseToPayrollConfig(req.body, license);
     const config = await prisma.payrollConfig.update({
       where: { id },
-      data: req.body,
+      data: {
+        ...constrained,
+        version: { increment: 1 },
+        dateEffet: constrained.dateEffet ? new Date(constrained.dateEffet) : undefined,
+      },
       include: { company: { select: { id: true, name: true } } }
     });
-    res.json(config);
+    res.json(applyLicenseToPayrollConfig(config, license));
   } catch (error) {
     console.error("Erreur PUT /payroll-config/:id:", error);
     res.status(400).json({ error: error.message });

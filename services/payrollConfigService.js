@@ -1,4 +1,5 @@
 import { prisma } from "../prismaClient.js";
+import { monthlyHoursFromWeekly, STANDARD_WEEKLY_HOURS } from "../utils/payrollHours.js";
 
 const includeRelations = {
   company: {
@@ -23,8 +24,8 @@ export const getPayrollConfigByCompany = async (companyId) => {
         companyId,
         regime: "MOROCCO_STANDARD",
         currency: "MAD",
-        weeklyHours: 44,
-        monthlyHours: 191.33,
+        weeklyHours: STANDARD_WEEKLY_HOURS,
+        monthlyHours: monthlyHoursFromWeekly(STANDARD_WEEKLY_HOURS),
         workingDaysPerMonth: 26,
         cnssEnabled: true,
         amoEnabled: true,

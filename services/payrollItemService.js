@@ -7,7 +7,7 @@ const includeRelations = {
       id: true, 
       runNumber: true, 
       status: true,
-      companyId: true  // ✅ Important
+      companyId: true  
     } 
   },
 };

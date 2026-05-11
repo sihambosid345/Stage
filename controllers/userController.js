@@ -15,13 +15,10 @@ export const createUser = async (req, res) => {
     }
 
     if (isSuperAdmin) {
-      if (data.role !== 'SUPER_ADMIN' && !data.companyId) {
+      if (!data.companyId) {
         const err = new Error('Le super admin doit sélectionner une entreprise pour ce nouvel utilisateur.');
         err.status = 400;
         throw err;
-      }
-      if (data.role === 'SUPER_ADMIN') {
-        data.companyId = null;
       }
     } else {
       data.companyId = req.user.companyId;

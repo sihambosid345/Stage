@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { requireAdmin, requireSuperAdmin } from "../middlewares/authenticate.js";
 import { PrismaClient } from '@prisma/client';
+import { monthlyHoursFromWeekly, STANDARD_WEEKLY_HOURS } from "../utils/payrollHours.js";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -23,8 +24,8 @@ router.get("/", requireAdmin, async (req, res) => {
           companyId,
           regime: "MOROCCO_STANDARD",
           currency: "MAD",
-          weeklyHours: 44,
-          monthlyHours: 191.33,
+          weeklyHours: STANDARD_WEEKLY_HOURS,
+          monthlyHours: monthlyHoursFromWeekly(STANDARD_WEEKLY_HOURS),
           workingDaysPerMonth: 26,
           cnssEnabled: true,
           amoEnabled: true,

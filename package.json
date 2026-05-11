@@ -4,7 +4,10 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.7.0",
