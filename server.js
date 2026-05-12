@@ -135,12 +135,13 @@ api.delete("/licenses/:id",                       requireSuperAdmin, licenseCtrl
 
 
 // Payroll Periods
-api.post  ("/payroll-periods",     periodCtrl.createPeriod);
-api.get   ("/payroll-periods",     periodCtrl.getPeriods);
-api.get   ("/payroll-periods/:id", periodCtrl.getPeriod);
-api.put   ("/payroll-periods/:id", periodCtrl.updatePeriod);
-api.post  ("/payroll-periods/:id/close", periodCtrl.closePeriod);
-api.delete("/payroll-periods/:id", periodCtrl.deletePeriod);
+api.post  ("/payroll-periods",                  periodCtrl.createPeriod);
+api.get   ("/payroll-periods",                  periodCtrl.getPeriods);
+api.get   ("/payroll-periods/open/:companyId",  periodCtrl.getOpenPeriod);
+api.get   ("/payroll-periods/:id",              periodCtrl.getPeriod);
+api.put   ("/payroll-periods/:id",              periodCtrl.updatePeriod);
+api.post  ("/payroll-periods/:id/close",        periodCtrl.closePeriod);
+api.delete("/payroll-periods/:id",              periodCtrl.deletePeriod);
 
 // Payroll Runs
 api.post  ("/payroll-runs",                       runCtrl.createRun);

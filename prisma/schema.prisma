@@ -98,12 +98,6 @@ enum VariableItemType {
   AVANCE
   RETENUE
   PRIME
-  ALLOWANCE
-  BONUS
-  DEDUCTION
-  ADVANCE
-  OVERTIME
-  OTHER
 }
 
 enum VariableValueType {

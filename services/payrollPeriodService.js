@@ -5,18 +5,9 @@ const includeRelations = {
   createdBy: { select: { id: true, firstName: true, lastName: true } },
 };
 
-/** Champs acceptes par Prisma (evite erreurs si le body contient des cles en trop). */
 const ALLOWED_PERIOD_FIELDS = [
-  "companyId",
-  "year",
-  "month",
-  "type",
-  "startDate",
-  "endDate",
-  "status",
-  "isLocked",
-  "notes",
-  "createdById",
+  "companyId", "year", "month", "type",
+  "startDate", "endDate", "status", "isLocked", "notes", "createdById",
 ];
 
 const pickPeriodPayload = (data) => {
@@ -33,143 +24,189 @@ const pickPeriodPayload = (data) => {
 const parseDates = (data) => ({
   ...data,
   startDate: data.startDate ? new Date(data.startDate) : undefined,
-  endDate: data.endDate ? new Date(data.endDate) : undefined,
+  endDate:   data.endDate   ? new Date(data.endDate)   : undefined,
 });
 
-const addDays = (date, days) => {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-};
+const startOfDay = (date) => { const d = new Date(date); d.setHours(0,0,0,0); return d; };
+const endOfDay   = (date) => { const d = new Date(date); d.setHours(23,59,59,999); return d; };
+const addDays    = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); return d; };
 
-const startOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const endOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(23, 59, 59, 999);
-  return d;
-};
+const MONTH_NAMES_FR = [
+  "Janvier","Février","Mars","Avril","Mai","Juin",
+  "Juillet","Août","Septembre","Octobre","Novembre","Décembre",
+];
 
 const monthBounds = (year, month) => {
-  // month: 1-12
   const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0);
+  const end   = new Date(year, month, 0);
   return { startDate: startOfDay(start), endDate: endOfDay(end) };
 };
 
-const nextMonthYear = (year, month) => {
-  if (month === 12) return { year: year + 1, month: 1 };
-  return { year, month: month + 1 };
-};
+const nextMonthYear = (year, month) =>
+  month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
 
 const requireCompanyId = (data) => {
-  if (!data?.companyId) throw { status: 400, message: "companyId is required" };
+  if (!data?.companyId) throw { status: 400, message: "companyId est requis." };
   return data.companyId;
 };
 
-const ensureSingleOpenPeriod = async (companyId, exceptId) => {
+/**
+ * Vérifie qu'il n'existe pas déjà une période OPEN pour cette entreprise.
+ * Retourne les détails de la période existante pour un message d'erreur précis.
+ */
+const ensureSingleOpenPeriod = async (companyId, exceptId = null) => {
   const where = { companyId, status: "OPEN" };
   if (exceptId) where.id = { not: exceptId };
-  const existing = await prisma.payrollPeriod.findFirst({ where, select: { id: true } });
+
+  const existing = await prisma.payrollPeriod.findFirst({
+    where,
+    select: { id: true, year: true, month: true, startDate: true, endDate: true },
+  });
+
   if (existing) {
-    throw { status: 400, message: "Une seule période OPEN est autorisée par entreprise." };
+    const monthName = MONTH_NAMES_FR[(existing.month ?? 1) - 1] ?? existing.month;
+    throw {
+      status: 409,
+      code: "OPEN_PERIOD_EXISTS",
+      message:
+        `Une période OPEN existe déjà pour ${monthName} ${existing.year}. ` +
+        `Clôturez-la avant d'en créer une nouvelle.`,
+      existingPeriod: existing,
+    };
   }
 };
 
-const ensureNextPeriodExists = async (period, createdById) => {
-  if (!period?.companyId || !period?.startDate || !period?.endDate) return;
-
-  let next;
-  if (period.type === "MONTHLY") {
-    const { year, month } = nextMonthYear(period.year, period.month);
-    const bounds = monthBounds(year, month);
-    next = {
-      companyId: period.companyId,
+/**
+ * Vérifie qu'il n'existe pas déjà une période pour cet (année, mois).
+ */
+const ensureNoDuplicatePeriod = async (companyId, year, month, exceptId = null) => {
+  const existing = await prisma.payrollPeriod.findFirst({
+    where: {
+      companyId,
       year,
       month,
-      type: period.type,
-      status: "CLOSED", // préparée à l'avance (1 seule OPEN)
-      startDate: bounds.startDate,
-      endDate: bounds.endDate,
-      createdById,
-    };
-  } else if (period.type === "WEEKLY") {
-    const nextStart = startOfDay(addDays(period.endDate, 1));
-    const nextEnd = endOfDay(addDays(nextStart, 6));
-    next = {
-      companyId: period.companyId,
-      year: nextStart.getFullYear(),
-      month: nextStart.getMonth() + 1,
-      type: period.type,
-      status: "CLOSED",
-      startDate: nextStart,
-      endDate: nextEnd,
-      createdById,
-    };
-  } else if (period.type === "CUSTOM") {
-    const durationDays = Math.max(
-      1,
-      Math.round((startOfDay(period.endDate) - startOfDay(period.startDate)) / (24 * 60 * 60 * 1000)) + 1
-    );
-    const nextStart = startOfDay(addDays(period.endDate, 1));
-    const nextEnd = endOfDay(addDays(nextStart, durationDays - 1));
-    next = {
-      companyId: period.companyId,
-      year: nextStart.getFullYear(),
-      month: nextStart.getMonth() + 1,
-      type: period.type,
-      status: "CLOSED",
-      startDate: nextStart,
-      endDate: nextEnd,
-      createdById,
-    };
-  }
-
-  if (!next) return;
-
-  const exists = await prisma.payrollPeriod.findUnique({
-    where: { companyId_year_month: { companyId: next.companyId, year: next.year, month: next.month } },
-    select: { id: true },
+      ...(exceptId ? { id: { not: exceptId } } : {}),
+    },
+    select: { id: true, status: true },
   });
-  if (!exists) {
-    await prisma.payrollPeriod.create({ data: next });
+
+  if (existing) {
+    const monthName = MONTH_NAMES_FR[month - 1] ?? month;
+    throw {
+      status: 409,
+      code: "DUPLICATE_PERIOD",
+      message:
+        `Une période existe déjà pour ${monthName} ${year} ` +
+        `(statut : ${existing.status}). Impossible de créer un doublon.`,
+      existingPeriod: existing,
+    };
   }
 };
 
-export const createPeriod = async (data) => {
+/**
+ * Crée automatiquement la période suivante (statut OPEN si aucune OPEN, sinon CLOSED).
+ * Ne fait rien si elle existe déjà.
+ */
+const ensureNextPeriodExists = async (period, createdById = null) => {
+  if (!period?.companyId) return null;
+
+  let nextYear, nextMonth, nextStart, nextEnd;
+
+  if (period.type === "MONTHLY") {
+    ({ year: nextYear, month: nextMonth } = nextMonthYear(period.year, period.month));
+    ({ startDate: nextStart, endDate: nextEnd } = monthBounds(nextYear, nextMonth));
+  } else if (period.type === "WEEKLY") {
+    const ns = startOfDay(addDays(period.endDate, 1));
+    nextStart = ns; nextEnd = endOfDay(addDays(ns, 6));
+    nextYear  = ns.getFullYear(); nextMonth = ns.getMonth() + 1;
+  } else if (period.type === "CUSTOM") {
+    const dur = Math.max(1,
+      Math.round((startOfDay(period.endDate) - startOfDay(period.startDate)) / 86_400_000) + 1
+    );
+    const ns = startOfDay(addDays(period.endDate, 1));
+    nextStart = ns; nextEnd = endOfDay(addDays(ns, dur - 1));
+    nextYear  = ns.getFullYear(); nextMonth = ns.getMonth() + 1;
+  } else {
+    return null;
+  }
+
+  // Vérifier si cette période suivante existe déjà
+  const exists = await prisma.payrollPeriod.findFirst({
+    where: { companyId: period.companyId, year: nextYear, month: nextMonth },
+    select: { id: true },
+  });
+  if (exists) return null;
+
+  // Vérifier s'il y a déjà une OPEN (dans ce cas la suivante sera CLOSED)
+  const anyOpen = await prisma.payrollPeriod.findFirst({
+    where: { companyId: period.companyId, status: "OPEN" },
+    select: { id: true },
+  });
+
+  const nextPeriod = await prisma.payrollPeriod.create({
+    data: {
+      companyId:  period.companyId,
+      year:       nextYear,
+      month:      nextMonth,
+      type:       period.type,
+      status:     anyOpen ? "CLOSED" : "OPEN",
+      startDate:  nextStart,
+      endDate:    nextEnd,
+      isLocked:   false,
+      ...(createdById ? { createdById } : {}),
+    },
+    include: includeRelations,
+  });
+
+  return nextPeriod;
+};
+
+// ─── Exports ─────────────────────────────────────────────────────────────────
+
+export const createPeriod = async (data, userId = null) => {
   const picked = pickPeriodPayload(data);
   const parsed = parseDates(picked);
   const companyId = requireCompanyId(parsed);
 
   if (!parsed.type) parsed.type = "MONTHLY";
+  if (!parsed.year)  parsed.year  = new Date().getFullYear();
+  if (!parsed.month) parsed.month = new Date().getMonth() + 1;
 
-  // Mensuel : toujours caler debut/fin sur le mois (annee + mois), ignore dates incoherentes du formulaire
-  if (parsed.type === "MONTHLY" && parsed.year && parsed.month) {
+  parsed.year  = parseInt(parsed.year, 10);
+  parsed.month = parseInt(parsed.month, 10);
+
+  // Pour MONTHLY : toujours caler les dates sur le calendrier
+  if (parsed.type === "MONTHLY") {
     const bounds = monthBounds(parsed.year, parsed.month);
     parsed.startDate = bounds.startDate;
-    parsed.endDate = bounds.endDate;
+    parsed.endDate   = bounds.endDate;
   }
 
-  // Règle stricte : une seule période OPEN par entreprise
-  // Si aucune période OPEN n'existe → on force la nouvelle en OPEN
-  // Si une période OPEN existe déjà → erreur
+  // 1. Vérifier doublon (même mois/année pour cette entreprise)
+  await ensureNoDuplicatePeriod(companyId, parsed.year, parsed.month);
+
+  // 2. Vérifier une seule OPEN par entreprise
   await ensureSingleOpenPeriod(companyId);
 
-  // Forcer le statut à OPEN (on ne peut pas créer une période avec un autre statut)
+  // La nouvelle période est forcée à OPEN
   parsed.status = "OPEN";
+  if (userId) parsed.createdById = userId;
 
-  return await prisma.payrollPeriod.create({
+  const created = await prisma.payrollPeriod.create({
     data: parsed,
     include: includeRelations,
   });
+
+  // 3. Créer automatiquement la période suivante (statut CLOSED, prête à ouvrir)
+  await ensureNextPeriodExists(created, userId);
+
+  return created;
 };
 
-export const getPeriods = async () => {
+export const getPeriods = async (companyId = null) => {
+  const where = companyId ? { companyId } : {};
   return await prisma.payrollPeriod.findMany({
+    where,
     include: includeRelations,
     orderBy: [{ year: "desc" }, { month: "desc" }],
   });
@@ -180,8 +217,19 @@ export const getPeriodById = async (id) => {
     where: { id },
     include: includeRelations,
   });
-  if (!period) throw { status: 404, message: "Payroll period not found" };
+  if (!period) throw { status: 404, message: "Période de paie introuvable." };
   return period;
+};
+
+/**
+ * Retourne la période OPEN d'une entreprise, ou null si aucune.
+ */
+export const getOpenPeriod = async (companyId) => {
+  if (!companyId) throw { status: 400, message: "companyId est requis." };
+  return await prisma.payrollPeriod.findFirst({
+    where: { companyId, status: "OPEN" },
+    include: includeRelations,
+  });
 };
 
 export const updatePeriod = async (id, data) => {
@@ -189,77 +237,112 @@ export const updatePeriod = async (id, data) => {
   const picked = pickPeriodPayload(data);
   const parsed = parseDates(picked);
 
-  const type = parsed.type ?? existing.type;
+  const type  = parsed.type  ?? existing.type;
+  const year  = parsed.year  ? parseInt(parsed.year, 10)  : existing.year;
+  const month = parsed.month ? parseInt(parsed.month, 10) : existing.month;
+
   if (type === "MONTHLY") {
-    const year = parsed.year ?? existing.year;
-    const month = parsed.month ?? existing.month;
-    if (year && month) {
-      const bounds = monthBounds(year, month);
-      parsed.startDate = bounds.startDate;
-      parsed.endDate = bounds.endDate;
-    }
+    const bounds = monthBounds(year, month);
+    parsed.startDate = bounds.startDate;
+    parsed.endDate   = bounds.endDate;
+    parsed.year  = year;
+    parsed.month = month;
   }
 
-  // Enforce single OPEN if status becomes OPEN
+  // Si on change d'année/mois → vérifier doublon
+  if ((parsed.year && parsed.year !== existing.year) ||
+      (parsed.month && parsed.month !== existing.month)) {
+    await ensureNoDuplicatePeriod(existing.companyId, year, month, id);
+  }
+
+  // Si on passe à OPEN → vérifier unicité
   if (parsed.status === "OPEN" && existing.status !== "OPEN") {
     await ensureSingleOpenPeriod(existing.companyId, id);
   }
 
   return await prisma.payrollPeriod.update({
     where: { id },
-    data: parsed, // ✅ fix + rules
+    data: parsed,
     include: includeRelations,
   });
 };
 
 export const deletePeriod = async (id) => {
-  await getPeriodById(id);
+  const existing = await getPeriodById(id);
+  if (existing.status === "OPEN") {
+    throw {
+      status: 400,
+      code: "CANNOT_DELETE_OPEN",
+      message: "Impossible de supprimer une période OPEN. Clôturez-la d'abord.",
+    };
+  }
   await prisma.payrollPeriod.delete({ where: { id } });
 };
 
-export const closePeriodAndOpenNext = async (id, userId) => {
+/**
+ * Clôture la période courante et ouvre automatiquement la suivante.
+ * Crée la période suivante si elle n'existe pas encore.
+ */
+export const closePeriodAndOpenNext = async (id, userId = null) => {
   const existing = await getPeriodById(id);
 
-  const updated = await prisma.payrollPeriod.update({
+  if (existing.status !== "OPEN") {
+    throw {
+      status: 400,
+      code: "NOT_OPEN",
+      message: `Cette période est déjà en statut "${existing.status}". Seule une période OPEN peut être clôturée.`,
+    };
+  }
+
+  // Clôturer la période courante
+  const closed = await prisma.payrollPeriod.update({
     where: { id },
     data: { status: "CLOSED" },
     include: includeRelations,
   });
 
-  // Ensure a next period exists (prepared) and open it if none open.
-  await ensureNextPeriodExists(existing, userId);
+  // S'assurer que la suivante existe
+  const nextCreated = await ensureNextPeriodExists(existing, userId);
 
-  const anyOpen = await prisma.payrollPeriod.findFirst({
-    where: { companyId: existing.companyId, status: "OPEN" },
-    select: { id: true },
-  });
+  // Trouver la période suivante et l'ouvrir
+  let nextPeriod = nextCreated;
 
-  if (!anyOpen) {
-    // open next month/week/custom period
-    let openTarget;
+  if (!nextPeriod) {
     if (existing.type === "MONTHLY") {
-      const { year, month } = nextMonthYear(existing.year, existing.month);
-      openTarget = await prisma.payrollPeriod.findUnique({
-        where: { companyId_year_month: { companyId: existing.companyId, year, month } },
+      const { year: ny, month: nm } = nextMonthYear(existing.year, existing.month);
+      nextPeriod = await prisma.payrollPeriod.findFirst({
+        where: { companyId: existing.companyId, year: ny, month: nm },
+        include: includeRelations,
       });
     } else {
-      openTarget = await prisma.payrollPeriod.findFirst({
+      nextPeriod = await prisma.payrollPeriod.findFirst({
         where: {
           companyId: existing.companyId,
           startDate: { gt: existing.endDate },
+          status: { not: "OPEN" },
         },
         orderBy: { startDate: "asc" },
-      });
-    }
-
-    if (openTarget) {
-      await ensureSingleOpenPeriod(existing.companyId, openTarget.id);
-      await prisma.payrollPeriod.update({
-        where: { id: openTarget.id },
-        data: { status: "OPEN" },
+        include: includeRelations,
       });
     }
   }
 
-  return updated;
+  if (nextPeriod && nextPeriod.status !== "OPEN") {
+    // Vérification de sécurité : aucune autre OPEN ne doit exister
+    await ensureSingleOpenPeriod(existing.companyId, nextPeriod.id);
+    nextPeriod = await prisma.payrollPeriod.update({
+      where: { id: nextPeriod.id },
+      data: { status: "OPEN" },
+      include: includeRelations,
+    });
+  }
+
+  return {
+    closed,
+    opened: nextPeriod ?? null,
+    message: nextPeriod
+      ? `Période ${MONTH_NAMES_FR[(existing.month ?? 1) - 1]} ${existing.year} clôturée. ` +
+        `Période ${MONTH_NAMES_FR[(nextPeriod.month ?? 1) - 1]} ${nextPeriod.year} ouverte automatiquement.`
+      : `Période ${MONTH_NAMES_FR[(existing.month ?? 1) - 1]} ${existing.year} clôturée.`,
+  };
 };
