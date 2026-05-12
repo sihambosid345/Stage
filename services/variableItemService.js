@@ -8,12 +8,29 @@ const includeRelations = {
 
 const parseDates = (data) => ({
   ...data,
-  effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : undefined, // ✅ fix
+  effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : undefined,
 });
 
 export const createVariableItem = async (data) => {
+  // 🔧 CORRECTION : Récupérer le companyId de l'employé
+  const employee = await prisma.employee.findUnique({
+    where: { id: data.employeeId },
+    select: { companyId: true },
+  });
+
+  if (!employee) {
+    throw { status: 404, message: "Employee not found" };
+  }
+
+  if (!employee.companyId) {
+    throw { status: 400, message: "Employee has no associated company" };
+  }
+
   return await prisma.variableItem.create({
-    data: parseDates(data), // ✅ fix
+    data: {
+      ...parseDates(data),
+      companyId: employee.companyId, // ← AJOUTÉ ICI
+    },
     include: includeRelations,
   });
 };
@@ -43,7 +60,7 @@ export const updateVariableItem = async (id, data) => {
   await getVariableItemById(id);
   return await prisma.variableItem.update({
     where: { id },
-    data: parseDates(data), // ✅ fix
+    data: parseDates(data),
     include: includeRelations,
   });
 };
