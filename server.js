@@ -11,6 +11,8 @@ const __dirname = path.dirname(__filename);
 
 import authRoutes       from "./routes/authRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
+import payrollCalculationRoutes from './routes/payrollCalculationRoutes.js';
+
 import { authenticate, requireAdmin, requireSuperAdmin } from "./middlewares/authenticate.js";
 import { licenseMiddleware } from "./middlewares/licenseMiddleware.js";
 
@@ -41,6 +43,8 @@ app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:4200", cred
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.use('/api/payroll-calculation', payrollCalculationRoutes);
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
