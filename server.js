@@ -59,7 +59,9 @@ api.use(licenseMiddleware);
 // ── Companies ────────────────────────────────────────────────────────────────
 api.post  ("/companies",      requireSuperAdmin, companyCtrl.createCompany);
 api.get   ("/companies/mine", companyCtrl.getMyCompany);
-api.get   ("/companies",      requireSuperAdmin, companyCtrl.getCompanies);
+// ✅ FIX 1 : requireAdmin au lieu de requireSuperAdmin
+// companyCtrl.getCompanies filtre déjà par companyId si pas superAdmin
+api.get   ("/companies",      requireAdmin, companyCtrl.getCompanies);
 api.get   ("/companies/:id",  companyCtrl.getCompany);
 api.put   ("/companies/:id",  companyCtrl.updateCompany);
 api.delete("/companies/:id",  requireSuperAdmin, companyCtrl.deleteCompany);
@@ -198,7 +200,6 @@ const getLicenseForCompany = async (companyId) => {
 
 const applyLicenseToPayrollConfig = (config, license) => {
   if (!config || !license) return config;
-  // Modules doivent venir de la licence (source de vérité)
   const constrained = {
     ...config,
     cnssEnabled: !!license.cnssEnabled,
@@ -206,10 +207,8 @@ const applyLicenseToPayrollConfig = (config, license) => {
     damancomEnabled: !!license.damancomEnabled,
     cimrEnabled: !!license.cimrEnabled,
   };
-  // AMO suit CNSS par défaut (peut être ajusté plus tard)
   constrained.amoEnabled = !!license.cnssEnabled;
 
-  // Régime doit être disponible selon la licence
   if (Array.isArray(license.availableRegimes) && license.availableRegimes.length > 0) {
     if (!license.availableRegimes.includes(constrained.regime)) {
       constrained.regime = license.availableRegimes[0];
@@ -239,7 +238,6 @@ api.post("/payroll-config/upsert", requireAdmin, async (req, res) => {
     const companyId = req.user.companyId;
     console.log("UPSERT /payroll-config - companyId:", companyId);
 
-    // Super Admin n'a pas de companyId → erreur claire
     if (!companyId) {
       return res.status(400).json({
         error: "Super Admin ne peut pas faire un upsert sans companyId. Utilisez PUT /:id à la place."
@@ -273,16 +271,17 @@ api.post("/payroll-config/upsert", requireAdmin, async (req, res) => {
   }
 });
 
-/// ── GET / — Config de l'entreprise connectée ───────────────────────────────
+// ── 3. GET / — Config de l'entreprise connectée ──────────────────────────────
 api.get("/payroll-config", requireAdmin, async (req, res) => {
   try {
     const companyId = req.user.companyId;
-    const isSuperAdmin = req.user.isSuperAdmin || false;
-    
+    // ✅ FIX 2 : vérification correcte du rôle (retire || !companyId qui causait la fuite)
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN';
+
     console.log("GET /payroll-config - companyId:", companyId, "isSuperAdmin:", isSuperAdmin);
 
-    // Si SUPER_ADMIN (pas de companyId), retourner TOUTES les configs
-    if (isSuperAdmin || !companyId) {
+    // Super Admin → toutes les configs
+    if (isSuperAdmin) {
       console.log("Super Admin - retourne toutes les configs");
       const configs = await prisma.payrollConfig.findMany({
         include: { company: { select: { id: true, name: true, status: true } } },
@@ -291,7 +290,12 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
       return res.json(configs);
     }
 
-    // Admin normal → config de son entreprise (créée si inexistante)
+    // ✅ FIX 2 : Admin sans companyId → erreur explicite (plus de fuite vers findMany)
+    if (!companyId) {
+      return res.status(403).json({ error: "Aucune entreprise associée à cet utilisateur." });
+    }
+
+    // Admin normal → config de son entreprise uniquement
     const license = await getLicenseForCompany(companyId);
     let config = await prisma.payrollConfig.findUnique({
       where: { companyId },
@@ -318,9 +322,7 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
       });
     }
 
-    // Contrainte modules/régimes par licence
     const constrained = applyLicenseToPayrollConfig(config, license);
-    // Cache en DB (best-effort) pour garder cohérence
     if (license) {
       await prisma.payrollConfig.update({
         where: { id: config.id },
@@ -341,54 +343,50 @@ api.get("/payroll-config", requireAdmin, async (req, res) => {
   }
 });
 
-
-
 // ── 4. POST / — Créer une nouvelle config ─────────────────────────────────────
 api.post("/payroll-config", requireAdmin, async (req, res) => {
   try {
     const { companyId, ...configData } = req.body;
     const userCompanyId = req.user.companyId;
-    const isSuperAdmin = req.user.isSuperAdmin || false;
-    
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN';
+
     console.log("POST /payroll-config - body:", req.body);
     console.log("userCompanyId:", userCompanyId);
     console.log("isSuperAdmin:", isSuperAdmin);
-    
+
     let targetCompanyId = companyId;
-    
-    // Si c'est Super Admin, il DOIT fournir companyId dans le body
+
     if (isSuperAdmin) {
       if (!targetCompanyId) {
-        return res.status(400).json({ 
-          error: "companyId requis dans le body pour Super Admin" 
+        return res.status(400).json({
+          error: "companyId requis dans le body pour Super Admin"
         });
       }
     } else {
-      // Admin normal: utilise son propre companyId
       if (!userCompanyId) {
-        return res.status(400).json({ 
-          error: "Utilisateur non associé à une entreprise" 
+        return res.status(400).json({
+          error: "Utilisateur non associé à une entreprise"
         });
       }
+      // ✅ Admin normal ne peut créer que pour sa propre entreprise
       targetCompanyId = userCompanyId;
     }
 
-    // Vérifier si une config existe déjà pour cette entreprise
     const existing = await prisma.payrollConfig.findUnique({
       where: { companyId: targetCompanyId }
     });
 
     if (existing) {
-      return res.status(400).json({ 
-        error: "Une configuration existe déjà pour cette entreprise. Utilisez PUT pour modifier." 
+      return res.status(400).json({
+        error: "Une configuration existe déjà pour cette entreprise. Utilisez PUT pour modifier."
       });
     }
 
     const license = await getLicenseForCompany(targetCompanyId);
     const constrained = applyLicenseToPayrollConfig(configData, license);
     const config = await prisma.payrollConfig.create({
-      data: { 
-        companyId: targetCompanyId, 
+      data: {
+        companyId: targetCompanyId,
         ...constrained,
         version: 1,
         createdById: req.user?.id,
@@ -396,13 +394,14 @@ api.post("/payroll-config", requireAdmin, async (req, res) => {
       },
       include: { company: { select: { id: true, name: true } } }
     });
-    
+
     res.status(201).json(applyLicenseToPayrollConfig(config, license));
   } catch (error) {
     console.error("Erreur POST /payroll-config:", error);
     res.status(400).json({ error: error.message });
   }
 });
+
 // ── 5. PUT / — Mettre à jour la config de l'entreprise connectée ──────────────
 api.put("/payroll-config", requireAdmin, async (req, res) => {
   try {
@@ -505,8 +504,5 @@ app.use((err, _req, res, _next) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`));
-
-
-
 
 export default app;
