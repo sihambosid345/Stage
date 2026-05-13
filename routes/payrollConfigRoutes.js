@@ -47,11 +47,22 @@ router.get("/", requireAdmin, async (req, res) => {
 // Route pour créer une configuration
 router.post("/", requireAdmin, async (req, res) => {
   try {
-    const companyId = req.user.companyId;
-    console.log("POST /payroll-config - companyId:", companyId);
-    
+    // ✅ Super Admin peut spécifier le companyId dans le body (pour créer la config d'une autre entreprise)
+    // ✅ Admin normal utilise toujours req.user.companyId (sécurité : il ne peut pas changer d'entreprise)
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === "SUPER_ADMIN";
+    const companyId = isSuperAdmin
+      ? (req.body.companyId || req.user.companyId)
+      : req.user.companyId;
+    console.log("POST /payroll-config - companyId:", companyId, "isSuperAdmin:", isSuperAdmin);
+
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId manquant" });
+    }
+
+    // Extraire companyId du body pour éviter la duplication dans la création
+    const { companyId: _ignored, ...bodyWithoutCompanyId } = req.body;
     const config = await prisma.payrollConfig.create({
-      data: { companyId, ...req.body },
+      data: { companyId, ...bodyWithoutCompanyId },
       include: { company: { select: { id: true, name: true } } }
     });
     res.status(201).json(config);
@@ -168,12 +179,23 @@ router.put("/:id", requireSuperAdmin, async (req, res) => {
   }
 });
 
-// Route pour supprimer une config (super admin)
-router.delete("/:id", requireSuperAdmin, async (req, res) => {
+// Route pour supprimer une config
+// Super Admin : peut supprimer n'importe quelle config
+// Admin : peut supprimer uniquement la config de sa propre entreprise
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("DELETE /payroll-config/:id - id:", id);
-    
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === "SUPER_ADMIN";
+
+    const config = await prisma.payrollConfig.findUnique({ where: { id } });
+    if (!config) {
+      return res.status(404).json({ error: "Configuration non trouvée" });
+    }
+
+    if (!isSuperAdmin && config.companyId !== req.user.companyId) {
+      return res.status(403).json({ error: "Accès refusé. Vous ne pouvez supprimer que la configuration de votre entreprise." });
+    }
+
     await prisma.payrollConfig.delete({ where: { id } });
     res.json({ message: "Configuration supprimée avec succès" });
   } catch (error) {

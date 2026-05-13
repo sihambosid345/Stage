@@ -133,7 +133,20 @@ api.delete("/recurring-items/:id",                  recurringCtrl.deleteRecurrin
 
 // ── Licenses ──────────────────────────────────────────────────────────────────
 api.post  ("/licenses",                           requireSuperAdmin, licenseCtrl.createLicense);
-api.get   ("/licenses",                           requireSuperAdmin, licenseCtrl.getLicenses);
+api.get   ("/licenses", requireAdmin, async (req, res) => {
+  try {
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN';
+    if (isSuperAdmin) {
+      // Super Admin : toutes les licences
+      const licenses = await prisma.license.findMany({ orderBy: { createdAt: 'desc' } });
+      return res.json(licenses);
+    } else {
+      // Admin : seulement la licence de sa propre entreprise (retournée sous forme de tableau)
+      const license = await prisma.license.findUnique({ where: { companyId: req.user.companyId } });
+      return res.json(license ? [license] : []);
+    }
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 api.get   ("/licenses/company/:companyId",        requireAdmin,      licenseCtrl.getLicenseByCompany);
 api.get   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.getLicense);
 api.put   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.updateLicense);
@@ -478,15 +491,24 @@ api.put("/payroll-config/:id", requireSuperAdmin, async (req, res) => {
   }
 });
 
-// ── 8. DELETE /:id — Supprimer config (Super Admin) ───────────────────────────
-api.delete("/payroll-config/:id", requireSuperAdmin, async (req, res) => {
+// ── 8. DELETE /:id — Supprimer config (Super Admin OU Admin pour sa propre entreprise)
+api.delete("/payroll-config/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("DELETE /payroll-config/:id - id:", id);
+    const isSuperAdmin = req.user.isSuperAdmin || req.user.role === 'SUPER_ADMIN';
+
+    const config = await prisma.payrollConfig.findUnique({ where: { id } });
+    if (!config) return res.status(404).json({ error: 'Configuration non trouvée' });
+
+    // Admin : ne peut supprimer QUE la config de sa propre entreprise
+    if (!isSuperAdmin && config.companyId !== req.user.companyId) {
+      return res.status(403).json({ error: 'Accès refusé. Vous ne pouvez supprimer que la configuration de votre entreprise.' });
+    }
+
     await prisma.payrollConfig.delete({ where: { id } });
-    res.json({ message: "Configuration supprimée avec succès" });
+    res.json({ message: 'Configuration supprimée avec succès' });
   } catch (error) {
-    console.error("Erreur DELETE /payroll-config/:id:", error);
+    console.error('Erreur DELETE /payroll-config/:id:', error);
     res.status(400).json({ error: error.message });
   }
 });
