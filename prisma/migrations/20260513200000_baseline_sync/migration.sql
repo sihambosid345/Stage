@@ -1,0 +1,2 @@
+-- Baseline migration: DB already contains these changes
+-- This file intentionally left empty

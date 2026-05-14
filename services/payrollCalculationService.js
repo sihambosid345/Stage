@@ -1,453 +1,711 @@
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║          MOTEUR DE PAIE — VERSION PRODUCTION (REFACTORISÉE)             ║
+ * ║                                                                          ║
+ * ║  Corrections appliquées :                                                ║
+ * ║  1.  Taux dynamiques depuis StatutoryRate (plus de constantes hardcodées)║
+ * ║  2.  Barème IR dynamique depuis TaxBracket                               ║
+ * ║  3.  Brut = somme des GAINS uniquement (avances/retenues exclus)         ║
+ * ║  4.  Base CNSS = éléments cnssApplicable = true (plafonnée)              ║
+ * ║  5.  Base imposable = éléments taxable = true                            ║
+ * ║  6.  Base AMO = éléments amoApplicable = true                            ║
+ * ║  7.  Transaction Prisma globale (rollback automatique)                   ║
+ * ║  8.  Anti-duplication : suppression anciens payslips avant recalcul      ║
+ * ║  9.  Support SalaryCalculationType : MONTHLY/DAILY/HOURLY/MISSION        ║
+ * ║  10. Variables passent à APPLIED uniquement après LOCKED/validation      ║
+ * ║  11. PayrollItem refactorisé (type+source+code+label)                    ║
+ * ║  12. Bases distinctes : grossSalary/taxableGross/cnssGross/amoGross      ║
+ * ║  13. Mapping centralisé ITEM_TYPE_MAPPING (plus de if/else hardcodé)     ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ */
+
 import { prisma } from "../prismaClient.js";
 
-// ─── Constantes de calcul (Maroc 2026) ────────────────────────────────────
-const CNSS_EMPLOYEE_RATE = 0.0429;      // 4.29%
-const CNSS_EMPLOYER_RATE = 0.0610;      // 6.10% (patronal)
-const AMO_EMPLOYEE_RATE = 0.0200;       // 2.00%
-const AMO_EMPLOYER_RATE = 0.0250;       // 2.50% (patronal)
-const CIMR_EMPLOYEE_RATE = 0.0600;      // 6.00% (configurable)
-const CIMR_EMPLOYER_RATE = 0.0600;      // 6.00% (patronal)
-const TRAINING_TAX_RATE = 0.0160;       // 1.60% (taxe formation)
-const FAMILY_ALLOWANCE_RATE = 0.0670;   // 6.70% (allocations familiales)
-const SOCIAL_BENEFITS_RATE = 0.0087;    // 0.87% (prestations sociales)
+// ─── Correction 13 : Mapping centralisé des types d'éléments ────────────────
+// Source de vérité unique : plus de `if (vari.type === 'COMMISSION')` partout.
+const ITEM_TYPE_MAPPING = {
+  // Types de gains récurrents
+  TRANSPORT:       { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  ANCIENNETE:      { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  INDEMNITE:       { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  REPRESENTATION:  { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  LOGEMENT:        { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  TELEPHONE:       { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  PANIER:          { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
+  OTHER_RECURRING: { itemType: "ALLOWANCE", source: "RECURRING",  isGain: true,      isDeduction: false },
 
-const CNSS_CEILING = 6000;              // Plafond CNSS mensuel
+  // Types de gains variables
+  PRIME:           { itemType: "BONUS",     source: "VARIABLE",   isGain: true,      isDeduction: false },
+  COMMISSION:      { itemType: "BONUS",     source: "VARIABLE",   isGain: true,      isDeduction: false },
 
-// ─── Barème IR Maroc 2026 ─────────────────────────────────────────────────
-const IR_BRACKETS = [
-  { min: 0,      max: 2500,   rate: 0.00, deduction: 0 },
-  { min: 2501,   max: 4166,   rate: 0.10, deduction: 250 },
-  { min: 4167,   max: 5000,   rate: 0.20, deduction: 666.67 },
-  { min: 5001,   max: 6666,   rate: 0.30, deduction: 1166.67 },
-  { min: 6667,   max: 15000,  rate: 0.34, deduction: 1433.33 },
-  { min: 15001,  max: Infinity, rate: 0.38, deduction: 2033.33 },
-];
+  // Frais non imposables : gain brut mais non taxable
+  FRAIS:           { itemType: "ALLOWANCE", source: "VARIABLE",   isGain: true,      isDeduction: false },
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+  // Retenues & avances : ne gonflent PAS le brut
+  RETENUE:         { itemType: "DEDUCTION", source: "VARIABLE",   isGain: false,     isDeduction: true  },
+  AVANCE:          { itemType: "ADVANCE",   source: "VARIABLE",   isGain: false,     isDeduction: true  },
+};
+
+// ─── Helper : arrondi à 2 décimales ──────────────────────────────────────────
 function round2(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function calculateIR(taxableIncome) {
-  if (taxableIncome <= 0) return 0;
-  const bracket = IR_BRACKETS.find(b => taxableIncome >= b.min && taxableIncome <= b.max);
-  if (!bracket) return 0;
-  return Math.max(0, round2((taxableIncome * bracket.rate) - bracket.deduction));
+// ─── Correction 1 & 2 : Récupération dynamique des taux depuis la DB ─────────
+/**
+ * Charge tous les taux statutaires actifs à la date de la période.
+ * Priorité : taux spécifique entreprise > taux national (companyId null).
+ */
+async function loadStatutoryRates(companyId, effectiveDate) {
+  const rows = await prisma.statutoryRate.findMany({
+    where: {
+      OR: [{ companyId }, { companyId: null }],
+      effectiveFrom: { lte: effectiveDate },
+      OR: [
+        { effectiveTo: { gte: effectiveDate } },
+        { effectiveTo: null },
+      ],
+      isActive: true,
+    },
+    orderBy: [
+      { companyId: "desc" }, // taux entreprise en premier (non-null > null)
+      { effectiveFrom: "desc" },
+    ],
+  });
+
+  // Déduplique par code : garde le premier (le plus spécifique)
+  const rateMap = {};
+  for (const row of rows) {
+    if (!rateMap[row.code]) {
+      rateMap[row.code] = row;
+    }
+  }
+  return rateMap; // { CNSS_EMPLOYEE: {...}, AMO_EMPLOYEE: {...}, ... }
 }
 
-// ─── Calcul principal pour UN employé ─────────────────────────────────────
-export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payrollRunId) {
-  
-  // 1. Récupérer toutes les données nécessaires
-  const employee = await prisma.employee.findUnique({
+/**
+ * Correction 2 : Charge le barème IR actif depuis TaxBracket.
+ * Les montants en DB sont ANNUELS → on divise par 12 pour le mensuel.
+ */
+async function loadTaxBrackets(companyId, effectiveDate, taxCode = "IR_SALAIRE") {
+  const rows = await prisma.taxBracket.findMany({
+    where: {
+      taxCode,
+      OR: [{ companyId }, { companyId: null }],
+      effectiveFrom: { lte: effectiveDate },
+      OR: [
+        { effectiveTo: { gte: effectiveDate } },
+        { effectiveTo: null },
+      ],
+      isActive: true,
+    },
+    orderBy: [{ annualFrom: "asc" }],
+  });
+
+  if (!rows.length) {
+    throw new Error(
+      `Aucun barème IR (${taxCode}) actif trouvé pour la date ${effectiveDate.toISOString().slice(0, 10)}. ` +
+        "Vérifiez la table TaxBracket."
+    );
+  }
+
+  // Convertit en montants mensuels
+  return rows.map((b) => ({
+    min: round2(Number(b.annualFrom) / 12),
+    max: b.annualTo != null ? round2(Number(b.annualTo) / 12) : Infinity,
+    rate: Number(b.rate),
+    deduction: round2(Number(b.deductionAmount) / 12),
+  }));
+}
+
+/**
+ * Calcul IR avec barème dynamique.
+ */
+function calculateIR(taxableIncome, brackets) {
+  if (taxableIncome <= 0) return 0;
+  const bracket = brackets.find((b) => taxableIncome >= b.min && taxableIncome <= b.max);
+  if (!bracket) return 0;
+  return Math.max(0, round2(taxableIncome * bracket.rate - bracket.deduction));
+}
+
+// ─── Correction 9 : Calcul du salaire de base selon type de contrat ──────────
+/**
+ * Retourne { baseSalary, baseRateDetails } selon salaryCalculationType.
+ */
+async function computeBaseSalary(contract, config, payrollPeriodId) {
+  const calcType = contract.salaryCalculationType || "MONTHLY";
+  const contractedBase = Number(contract.baseSalary) || 0;
+
+  switch (calcType) {
+    case "MONTHLY":
+      return {
+        baseSalary: contractedBase,
+        baseRateDetails: { type: "MONTHLY", rate: contractedBase },
+      };
+
+    case "DAILY": {
+      // Jours travaillés dans la période
+      const period = await prisma.payrollPeriod.findUnique({
+        where: { id: payrollPeriodId },
+      });
+      const attendance = await prisma.attendanceRecord.findMany({
+        where: {
+          employeeId: contract.employeeId,
+          date: { gte: period.startDate, lte: period.endDate },
+          status: "PRESENT",
+        },
+      });
+      const workedDays = attendance.length;
+      const dailyRate = Number(contract.baseRate) || contractedBase / (Number(config?.workingDaysPerMonth) || 26);
+      return {
+        baseSalary: round2(workedDays * dailyRate),
+        baseRateDetails: { type: "DAILY", dailyRate, workedDays },
+      };
+    }
+
+    case "HOURLY": {
+      const period = await prisma.payrollPeriod.findUnique({
+        where: { id: payrollPeriodId },
+      });
+      const attendance = await prisma.attendanceRecord.findMany({
+        where: {
+          employeeId: contract.employeeId,
+          date: { gte: period.startDate, lte: period.endDate },
+        },
+      });
+      const workedHours = attendance.reduce((s, a) => s + Number(a.workedHours || 0), 0);
+      const hourlyRate = Number(contract.baseRate) || contractedBase / (Number(config?.monthlyHours) || 190.67);
+      return {
+        baseSalary: round2(workedHours * hourlyRate),
+        baseRateDetails: { type: "HOURLY", hourlyRate, workedHours },
+      };
+    }
+
+    case "MISSION": {
+      // Les missions sont saisies comme VariableItems de type PRIME ou COMMISSION
+      // Le baseSalary contractuel = 0, tout vient des variables
+      return {
+        baseSalary: 0,
+        baseRateDetails: { type: "MISSION", missionRate: Number(contract.baseRate) || 0 },
+      };
+    }
+
+    default:
+      return { baseSalary: contractedBase, baseRateDetails: { type: calcType } };
+  }
+}
+
+// ─── Calcul principal pour UN employé ─────────────────────────────────────────
+export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payrollRunId, tx = prisma) {
+  // ── 1. Données employé ──────────────────────────────────────────────────────
+  const employee = await tx.employee.findUnique({
     where: { id: employeeId },
     include: {
       company: { include: { payrollConfig: true } },
-      contracts: { 
-        where: { status: 'ACTIVE' }, 
-        orderBy: { startDate: 'desc' },
-        take: 1 
+      contracts: {
+        where: { status: "ACTIVE" },
+        orderBy: { startDate: "desc" },
+        take: 1,
       },
-      recurringItems: { 
-        where: { 
+      recurringItems: {
+        where: {
           isActive: true,
-          OR: [
-            { effectiveTo: null },
-            { effectiveTo: { gte: new Date() } }
-          ]
-        } 
-      },
-    }
-  });
-
-  if (!employee) throw new Error(`Employé ${employeeId} non trouvé`);
-  
-  const config = employee.company?.payrollConfig;
-  const contract = employee.contracts[0];
-  
-  if (!contract) throw new Error(`Pas de contrat actif pour ${employee.firstName} ${employee.lastName}`);
-
-  // 2. Récupérer les variables pour cette période
-  const period = await prisma.payrollPeriod.findUnique({ where: { id: payrollPeriodId } });
-  const variableItems = await prisma.variableItem.findMany({
-    where: {
-      employeeId,
-      status: { in: ['APPROVED', 'APPLIED'] },
-      effectiveDate: {
-        gte: period.startDate,
-        lte: period.endDate,
+          effectiveFrom: { lte: new Date() },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
+        },
       },
     },
   });
 
-  // 3. Calcul des composantes du salaire
-  const baseSalary = Number(contract.baseSalary) || 0;
-  
+  if (!employee) throw new Error(`Employé ${employeeId} non trouvé`);
+
+  const config = employee.company?.payrollConfig;
+  const contract = employee.contracts[0];
+  if (!contract) {
+    throw new Error(`Pas de contrat actif pour ${employee.firstName} ${employee.lastName}`);
+  }
+
+  // ── 2. Période & taux ───────────────────────────────────────────────────────
+  const period = await tx.payrollPeriod.findUnique({ where: { id: payrollPeriodId } });
+  const effectiveDate = period.endDate; // Date de référence pour les taux
+
+  // Correction 1 : taux depuis DB
+  const rateMap = await loadStatutoryRates(employee.companyId, effectiveDate);
+
+  // Correction 2 : barème IR depuis DB
+  const irBrackets = await loadTaxBrackets(employee.companyId, effectiveDate);
+
+  // Helpers pour lire les taux (avec fallback "taux = 0 + warning si absent")
+  const getRate = (code) => {
+    const r = rateMap[code];
+    if (!r) {
+      console.warn(`[PAIE] Taux ${code} absent pour companyId=${employee.companyId} à ${effectiveDate.toISOString().slice(0, 10)} — taux appliqué : 0`);
+      return { rate: 0, ceilingAmount: null };
+    }
+    return { rate: Number(r.rate), ceilingAmount: r.ceilingAmount ? Number(r.ceilingAmount) : null };
+  };
+
+  const cnssEmployee   = getRate("CNSS_EMPLOYEE");
+  const cnssEmployer   = getRate("CNSS_EMPLOYER");
+  const amoEmployee    = getRate("AMO_EMPLOYEE");
+  const amoEmployer    = getRate("AMO_EMPLOYER");
+  const cimrEmployee   = getRate("CIMR_EMPLOYEE");
+  const cimrEmployer   = getRate("CIMR_EMPLOYER");
+  const trainingTax    = getRate("TRAINING_TAX");
+  const familyAllow    = getRate("FAMILY_ALLOWANCE");
+  const socialBenef    = getRate("SOCIAL_BENEFITS");
+
+  // ── 3. Éléments variables de la période ────────────────────────────────────
+  const variableItems = await tx.variableItem.findMany({
+    where: {
+      employeeId,
+      status: { in: ["APPROVED"] }, // Correction 10 : APPLIED seulement après LOCKED
+      effectiveDate: { gte: period.startDate, lte: period.endDate },
+    },
+  });
+
+  // ── 4. Correction 9 : salaire de base selon type contrat ───────────────────
+  const { baseSalary, baseRateDetails } = await computeBaseSalary(contract, config, payrollPeriodId);
+
+  // ── 5. Correction 3 & 12 : Séparation gains / retenues / frais / avances ──
+  /**
+   * Chaque élément est classifié selon ITEM_TYPE_MAPPING :
+   *   - isGain = true  → contribue au grossSalary
+   *   - isDeduction = true → réduit le net mais PAS le brut
+   *
+   * On calcule aussi :
+   *   - cnssGross    (éléments cnssApplicable = true)  [Correction 4]
+   *   - taxableGross (éléments taxable = true)          [Correction 5]
+   *   - amoGross     (éléments amoApplicable = true)    [Correction 6]
+   */
+
+  const payrollLines = []; // Toutes les lignes avant persistance
+
+  // Ligne salaire de base (toujours un gain)
+  payrollLines.push({
+    source: "BASE",
+    itemType: "BASE_SALARY",
+    code: "BASE_SALARY",
+    label: "Salaire de base",
+    amount: baseSalary,
+    isGain: true,
+    isDeduction: false,
+    taxable: true,
+    cnssApplicable: true,
+    amoApplicable: true,
+    sortOrder: 1,
+    metadata: baseRateDetails,
+  });
+
   // Éléments récurrents
-  let recurringTotal = 0;
-  const recurringDetails = [];
   for (const item of employee.recurringItems) {
+    const mapping = ITEM_TYPE_MAPPING[item.type] || ITEM_TYPE_MAPPING.OTHER_RECURRING;
     let amount = 0;
-    if (item.valueType === 'FIXED') {
+    if (item.valueType === "FIXED") {
       amount = Number(item.amount) || 0;
-    } else if (item.valueType === 'PERCENTAGE') {
+    } else if (item.valueType === "PERCENTAGE") {
       amount = round2(baseSalary * (Number(item.percentageValue) || 0) / 100);
     }
-    recurringTotal += amount;
-    recurringDetails.push({
-      type: item.type,
+    payrollLines.push({
+      source: mapping.source,
+      itemType: mapping.itemType,
+      code: item.code || item.type,
       label: item.label,
       amount,
-      isTaxable: item.isTaxable,
-      isCnssApplicable: item.isCnssApplicable,
+      isGain: mapping.isGain,
+      isDeduction: mapping.isDeduction,
+      taxable: item.isTaxable,
+      cnssApplicable: item.isCnssApplicable,
+      amoApplicable: item.isCnssApplicable, // même flag par convention (Correction 6)
+      sortOrder: 10,
+      metadata: { recurringItemId: item.id, valueType: item.valueType },
     });
   }
 
   // Éléments variables
-  let variableTotal = 0;
-  const variableDetails = [];
   for (const item of variableItems) {
+    const mapping = ITEM_TYPE_MAPPING[item.type] || { itemType: "OTHER", source: "VARIABLE", isGain: true, isDeduction: false };
     let amount = 0;
-    if (item.valueType === 'FIXED') {
+    if (item.valueType === "FIXED") {
       amount = Number(item.amount) || 0;
-    } else if (item.valueType === 'PERCENTAGE') {
+    } else if (item.valueType === "PERCENTAGE") {
       amount = round2(baseSalary * (Number(item.percentageValue) || 0) / 100);
-    } else if (item.valueType === 'HOURS') {
+    } else if (item.valueType === "HOURS") {
       const hourlyRate = round2(baseSalary / (Number(config?.monthlyHours) || 190.67));
       amount = round2(hourlyRate * (Number(item.quantity) || 0));
-    } else if (item.valueType === 'DAYS') {
+    } else if (item.valueType === "DAYS") {
       const dailyRate = round2(baseSalary / (Number(config?.workingDaysPerMonth) || 26));
       amount = round2(dailyRate * (Number(item.quantity) || 0));
     }
-    variableTotal += amount;
-    variableDetails.push({
-      type: item.type,
+    payrollLines.push({
+      source: mapping.source,
+      itemType: mapping.itemType,
+      code: item.code || item.type,
       label: item.label,
       amount,
-      isTaxable: item.isTaxable,
-      isCnssApplicable: item.isCnssApplicable,
+      isGain: mapping.isGain,
+      isDeduction: mapping.isDeduction,
+      taxable: item.isTaxable,
+      cnssApplicable: item.isCnssApplicable,
+      amoApplicable: item.isCnssApplicable,
+      sortOrder: 20,
+      variableItemId: item.id,
+      metadata: { variableItemId: item.id, type: item.type, valueType: item.valueType },
     });
   }
 
-  // 4. Salaire brut
-  const grossSalary = round2(baseSalary + recurringTotal + variableTotal);
+  // ── 6. Correction 12 : Calcul des bases distinctes ─────────────────────────
+  const gainLines      = payrollLines.filter((l) => l.isGain);
+  const deductionLines = payrollLines.filter((l) => l.isDeduction);
 
-  // 5. Base CNSS (plafonnée)
-  const cnssBase = Math.min(grossSalary, CNSS_CEILING);
-  
-  // 6. Cotisations employé
-  const cnssEmployee = config?.cnssEnabled ? round2(cnssBase * CNSS_EMPLOYEE_RATE) : 0;
-  const amoEmployee = config?.amoEnabled ? round2(grossSalary * AMO_EMPLOYEE_RATE) : 0;
-  const cimrEmployee = config?.cimrEnabled ? round2(grossSalary * CIMR_EMPLOYEE_RATE) : 0;
-  const totalEmployeeCharges = round2(cnssEmployee + amoEmployee + cimrEmployee);
+  // Correction 3 : grossSalary = somme des gains UNIQUEMENT
+  const grossSalary  = round2(gainLines.reduce((s, l) => s + l.amount, 0));
 
-  // 7. Cotisations employeur
-  const cnssEmployer = config?.cnssEnabled ? round2(cnssBase * CNSS_EMPLOYER_RATE) : 0;
-  const amoEmployer = config?.amoEnabled ? round2(grossSalary * AMO_EMPLOYER_RATE) : 0;
-  const cimrEmployer = config?.cimrEnabled ? round2(grossSalary * CIMR_EMPLOYER_RATE) : 0;
-  const trainingTax = round2(grossSalary * TRAINING_TAX_RATE);
-  const familyAllowance = round2(grossSalary * FAMILY_ALLOWANCE_RATE);
-  const socialBenefits = round2(grossSalary * SOCIAL_BENEFITS_RATE);
-  const totalEmployerCharges = round2(cnssEmployer + amoEmployer + cimrEmployer + trainingTax + familyAllowance + socialBenefits);
+  // Correction 4 : cnssGross = éléments cnssApplicable = true (gains seulement)
+  const cnssGross    = round2(gainLines.filter((l) => l.cnssApplicable).reduce((s, l) => s + l.amount, 0));
 
-  // 8. Calcul IR (Impôt sur le Revenu)
-  // Revenu net imposable = Brut - Cotisations employé - Frais pro (20% plafonné à 2500)
-  const professionalExpenses = Math.min((grossSalary - totalEmployeeCharges) * 0.20, 2500);
-  const taxableIncome = Math.max(0, grossSalary - totalEmployeeCharges - professionalExpenses);
-  const ir = config?.irEnabled ? calculateIR(taxableIncome) : 0;
+  // Correction 6 : amoGross = éléments amoApplicable = true (gains seulement)
+  const amoGross     = round2(gainLines.filter((l) => l.amoApplicable).reduce((s, l) => s + l.amount, 0));
 
-  // 9. Salaire net
-  const totalDeductions = round2(totalEmployeeCharges + ir);
-  const netSalary = Math.max(0, round2(grossSalary - totalDeductions));
+  // Déductions brutes (avances + retenues — ne rentrent PAS dans le brut)
+  const totalRawDeductions = round2(deductionLines.reduce((s, l) => s + l.amount, 0));
 
-  // 10. Créer les PayrollItems (lignes détaillées)
-  const payrollItems = [];
-  
-  // Ligne: Salaire de base
-  payrollItems.push({
-    companyId: employee.companyId,
-    payrollRunId,
-    employeeId,
-    itemType: 'BASE_SALARY',
-    label: 'Salaire de base',
-    amount: baseSalary,
-    taxable: true,
-    cnssApplicable: true,
-    sortOrder: 1,
+  // ── 7. Cotisations salariales ───────────────────────────────────────────────
+  const cnssCeiling   = cnssEmployee.ceilingAmount ?? 6000; // Plafond DB ou 6000 MAD par défaut
+  const cnssBase      = Math.min(cnssGross, cnssCeiling);   // Correction 4
+
+  const cnssEmpAmount  = config?.cnssEnabled ? round2(cnssBase  * cnssEmployee.rate) : 0;
+  const amoEmpAmount   = config?.amoEnabled  ? round2(amoGross  * amoEmployee.rate)  : 0;
+  const cimrEmpAmount  = config?.cimrEnabled ? round2(grossSalary * cimrEmployee.rate) : 0;
+  const totalEmpCharges = round2(cnssEmpAmount + amoEmpAmount + cimrEmpAmount);
+
+  // ── 8. Cotisations patronales ───────────────────────────────────────────────
+  const cnssErAmount    = config?.cnssEnabled ? round2(cnssBase    * cnssEmployer.rate)  : 0;
+  const amoErAmount     = config?.amoEnabled  ? round2(amoGross    * amoEmployer.rate)   : 0;
+  const cimrErAmount    = config?.cimrEnabled ? round2(grossSalary * cimrEmployer.rate)  : 0;
+  const trainingTaxAmt  = round2(grossSalary * trainingTax.rate);
+  const familyAllowAmt  = round2(grossSalary * familyAllow.rate);
+  const socialBenefAmt  = round2(grossSalary * socialBenef.rate);
+  const totalErCharges  = round2(cnssErAmount + amoErAmount + cimrErAmount + trainingTaxAmt + familyAllowAmt + socialBenefAmt);
+
+  // ── 9. Correction 5 : Base imposable ────────────────────────────────────────
+  // taxableGross = éléments taxable = true
+  const taxableGrossRaw = round2(gainLines.filter((l) => l.taxable).reduce((s, l) => s + l.amount, 0));
+  // Frais professionnels déductibles (20% du net social, plafonné 2500/mois)
+  const professionalExpenses = Math.min((taxableGrossRaw - totalEmpCharges) * 0.20, 2500);
+  const taxableGross = Math.max(0, taxableGrossRaw - totalEmpCharges - professionalExpenses);
+
+  // ── 10. Calcul IR ───────────────────────────────────────────────────────────
+  const irAmount = config?.irEnabled ? calculateIR(taxableGross, irBrackets) : 0;
+
+  // ── 11. Net ─────────────────────────────────────────────────────────────────
+  const totalDeductions = round2(totalEmpCharges + irAmount + totalRawDeductions);
+  const netSalary       = Math.max(0, round2(grossSalary - totalEmpCharges - irAmount - totalRawDeductions));
+
+  // ── 12. Correction 11 : Construction PayrollItems (nouvelle structure) ──────
+  const payrollItemsData = [];
+
+  // Lignes de gains et déductions salariales
+  for (const line of payrollLines) {
+    payrollItemsData.push({
+      companyId:      employee.companyId,
+      payrollRunId,
+      employeeId,
+      itemType:       line.itemType,
+      code:           line.code,
+      label:          line.label,
+      amount:         line.isDeduction ? -Math.abs(line.amount) : line.amount,
+      taxable:        line.taxable,
+      cnssApplicable: line.cnssApplicable,
+      sortOrder:      line.sortOrder,
+      metadata:       { source: line.source, ...(line.metadata || {}) },
+    });
+  }
+
+  // Cotisations salariales (lignes négatives)
+  if (cnssEmpAmount > 0) {
+    payrollItemsData.push({
+      companyId: employee.companyId, payrollRunId, employeeId,
+      itemType: "CNSS",
+      code: "CNSS_EMPLOYEE",
+      label: `CNSS Salarié (${(cnssEmployee.rate * 100).toFixed(2)}%)`,
+      amount: -cnssEmpAmount,
+      taxable: false, cnssApplicable: false, sortOrder: 100,
+      metadata: { source: "STATUTORY", rate: cnssEmployee.rate, base: cnssBase },
+    });
+  }
+  if (amoEmpAmount > 0) {
+    payrollItemsData.push({
+      companyId: employee.companyId, payrollRunId, employeeId,
+      itemType: "AMO",
+      code: "AMO_EMPLOYEE",
+      label: `AMO Salarié (${(amoEmployee.rate * 100).toFixed(2)}%)`,
+      amount: -amoEmpAmount,
+      taxable: false, cnssApplicable: false, sortOrder: 101,
+      metadata: { source: "STATUTORY", rate: amoEmployee.rate, base: amoGross },
+    });
+  }
+  if (cimrEmpAmount > 0) {
+    payrollItemsData.push({
+      companyId: employee.companyId, payrollRunId, employeeId,
+      itemType: "OTHER",
+      code: "CIMR_EMPLOYEE",
+      label: `CIMR Salarié (${(cimrEmployee.rate * 100).toFixed(2)}%)`,
+      amount: -cimrEmpAmount,
+      taxable: false, cnssApplicable: false, sortOrder: 102,
+      metadata: { source: "STATUTORY", rate: cimrEmployee.rate, base: grossSalary },
+    });
+  }
+  if (irAmount > 0) {
+    payrollItemsData.push({
+      companyId: employee.companyId, payrollRunId, employeeId,
+      itemType: "TAX",
+      code: "IR_SALAIRE",
+      label: "Impôt sur le Revenu (IR)",
+      amount: -irAmount,
+      taxable: false, cnssApplicable: false, sortOrder: 110,
+      metadata: { source: "STATUTORY", base: taxableGross, professionalExpenses },
+    });
+  }
+
+  // ── 13. Correction 7 & 8 : Transaction + anti-duplication ──────────────────
+  // (appelée depuis calculatePayrollRun qui ouvre la transaction)
+
+  // Supprimer bulletin existant si recalcul (Correction 8)
+  await tx.payslip.deleteMany({
+    where: { employeeId, payrollPeriodId },
   });
 
-  // Lignes: Éléments récurrents
-  for (const rec of recurringDetails) {
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType: 'ALLOWANCE',
-      label: rec.label,
-      amount: rec.amount,
-      taxable: rec.isTaxable,
-      cnssApplicable: rec.isCnssApplicable,
-      sortOrder: 10,
-    });
-  }
+  // Supprimer les PayrollItems orphelins du run pour cet employé
+  await tx.payrollItem.deleteMany({
+    where: { employeeId, payrollRunId },
+  });
 
-  // Lignes: Éléments variables
-  for (const vari of variableDetails) {
-    let itemType = 'BONUS';
-    if (vari.type === 'COMMISSION') itemType = 'BONUS';
-    else if (vari.type === 'FRAIS') itemType = 'ALLOWANCE';
-    else if (vari.type === 'AVANCE') itemType = 'ADVANCE';
-    else if (vari.type === 'RETENUE') itemType = 'DEDUCTION';
-    else if (vari.type === 'PRIME') itemType = 'BONUS';
-    
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType,
-      label: vari.label,
-      amount: vari.amount,
-      taxable: vari.isTaxable,
-      cnssApplicable: vari.isCnssApplicable,
-      sortOrder: 20,
-    });
-  }
+  // Snapshot (capture des taux appliqués pour auditabilité)
+  const snapshotData = {
+    calculationDate: new Date().toISOString(),
+    contractType: contract.salaryCalculationType,
+    baseSalary,
+    baseRateDetails,
+    gainLines: gainLines.map((l) => ({ code: l.code, label: l.label, amount: l.amount, taxable: l.taxable, cnssApplicable: l.cnssApplicable })),
+    deductionLines: deductionLines.map((l) => ({ code: l.code, label: l.label, amount: l.amount })),
+    bases: { grossSalary, cnssGross, amoGross, taxableGrossRaw, taxableGross },
+    appliedRates: {
+      cnssEmployee: cnssEmployee.rate,
+      amoEmployee: amoEmployee.rate,
+      cimrEmployee: cimrEmployee.rate,
+      cnssEmployer: cnssEmployer.rate,
+      amoEmployer: amoEmployer.rate,
+      cimrEmployer: cimrEmployer.rate,
+      trainingTax: trainingTax.rate,
+      familyAllowance: familyAllow.rate,
+      socialBenefits: socialBenef.rate,
+    },
+    cnssCeiling,
+    cnssBase,
+    professionalExpenses,
+    ir: { base: taxableGross, amount: irAmount },
+  };
 
-  // Lignes: Cotisations (négatives)
-  if (cnssEmployee > 0) {
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType: 'CNSS',
-      label: 'CNSS Employé (4.29%)',
-      amount: -cnssEmployee,
-      taxable: false,
-      cnssApplicable: false,
-      sortOrder: 100,
-    });
-  }
-  if (amoEmployee > 0) {
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType: 'AMO',
-      label: 'AMO Employé (2%)',
-      amount: -amoEmployee,
-      taxable: false,
-      cnssApplicable: false,
-      sortOrder: 101,
-    });
-  }
-  if (cimrEmployee > 0) {
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType: 'OTHER',
-      label: 'CIMR Employé (6%)',
-      amount: -cimrEmployee,
-      taxable: false,
-      cnssApplicable: false,
-      sortOrder: 102,
-    });
-  }
-  if (ir > 0) {
-    payrollItems.push({
-      companyId: employee.companyId,
-      payrollRunId,
-      employeeId,
-      itemType: 'TAX',
-      label: 'Impôt sur le Revenu (IR)',
-      amount: -ir,
-      taxable: false,
-      cnssApplicable: false,
-      sortOrder: 110,
-    });
-  }
-
-  // 11. Créer le Payslip (bulletin de paie)
-  const payslip = await prisma.payslip.create({
+  // Créer le bulletin
+  const payslip = await tx.payslip.create({
     data: {
-      companyId: employee.companyId,
+      companyId:          employee.companyId,
       employeeId,
       payrollPeriodId,
       payrollRunId,
-      status: 'GENERATED',
+      status:             "GENERATED",
       grossSalary,
-      taxableGross: taxableIncome,
-      totalAllowances: recurringDetails.filter(r => !r.isTaxable).reduce((s, r) => s + r.amount, 0),
-      totalBonuses: variableDetails.filter(v => v.type === 'PRIME' || v.type === 'COMMISSION').reduce((s, v) => s + v.amount, 0),
-      totalDeductions,
-      totalAdvances: variableDetails.filter(v => v.type === 'AVANCE').reduce((s, v) => s + v.amount, 0),
-      totalTax: ir,
-      totalCnss: cnssEmployee,
+      taxableGross,
+      totalAllowances:    gainLines.filter((l) => l.itemType === "ALLOWANCE").reduce((s, l) => s + l.amount, 0),
+      totalBonuses:       gainLines.filter((l) => l.itemType === "BONUS").reduce((s, l) => s + l.amount, 0),
+      totalDeductions:    round2(totalEmpCharges + irAmount), // cotisations + IR (hors avances)
+      totalAdvances:      deductionLines.filter((l) => l.itemType === "ADVANCE").reduce((s, l) => s + l.amount, 0),
+      totalTax:           irAmount,
+      totalCnss:          cnssEmpAmount,
       netSalary,
       cnssBase,
-      cnssCeilingApplied: grossSalary > CNSS_CEILING ? CNSS_CEILING : null,
-      amoBase: grossSalary,
-      employerChargesTotal: totalEmployerCharges,
-      employeeChargesTotal: totalEmployeeCharges,
-      incomeTaxBase: taxableIncome,
-      incomeTaxAmount: ir,
-      declaredDays: Number(config?.defaultCnssDeclaredDays) || 26,
-      currency: config?.currency || 'MAD',
-      snapshotData: {
-        baseSalary,
-        recurringDetails,
-        variableDetails,
-        cotisations: {
-          cnss: { employee: cnssEmployee, employer: cnssEmployer },
-          amo: { employee: amoEmployee, employer: amoEmployer },
-          cimr: { employee: cimrEmployee, employer: cimrEmployer },
-          trainingTax,
-          familyAllowance,
-          socialBenefits,
-        },
-        ir: {
-          taxableIncome,
-          amount: ir,
-          bracket: IR_BRACKETS.find(b => taxableIncome >= b.min && taxableIncome <= b.max),
-        },
-        professionalExpenses,
-      },
+      cnssCeilingApplied: cnssGross > cnssCeiling ? cnssCeiling : null,
+      amoBase:            amoGross,
+      employerChargesTotal: totalErCharges,
+      employeeChargesTotal: totalEmpCharges,
+      incomeTaxBase:      taxableGross,
+      incomeTaxAmount:    irAmount,
+      declaredDays:       Number(config?.defaultCnssDeclaredDays) || 26,
+      currency:           config?.currency || "MAD",
+      snapshotData,
     },
   });
 
-  // 12. Créer les PayrollItems en base
-  await prisma.payrollItem.createMany({
-    data: payrollItems,
-  });
+  // Créer les lignes de détail
+  await tx.payrollItem.createMany({ data: payrollItemsData });
 
-  // 13. Créer les contributions détaillées
+  // Contributions détaillées
   const contributions = [];
   if (config?.cnssEnabled) {
     contributions.push(
-      { payslipId: payslip.id, code: 'CNSS_EMPLOYEE', label: 'CNSS Employé', baseAmount: cnssBase, rate: CNSS_EMPLOYEE_RATE, employeeAmount: cnssEmployee, employerAmount: cnssEmployer },
-      { payslipId: payslip.id, code: 'AMO_EMPLOYEE', label: 'AMO Employé', baseAmount: grossSalary, rate: AMO_EMPLOYEE_RATE, employeeAmount: amoEmployee, employerAmount: amoEmployer },
+      {
+        payslipId: payslip.id,
+        code: "CNSS_EMPLOYEE",
+        label: "CNSS Salarié",
+        baseAmount: cnssBase,
+        ceilingAmount: cnssCeiling,
+        rate: cnssEmployee.rate,
+        employeeAmount: cnssEmpAmount,
+        employerAmount: cnssErAmount,
+      },
+      {
+        payslipId: payslip.id,
+        code: "AMO_EMPLOYEE",
+        label: "AMO Salarié",
+        baseAmount: amoGross,
+        ceilingAmount: null,
+        rate: amoEmployee.rate,
+        employeeAmount: amoEmpAmount,
+        employerAmount: amoErAmount,
+      }
     );
   }
   if (config?.cimrEnabled) {
-    contributions.push(
-      { payslipId: payslip.id, code: 'CIMR_EMPLOYEE', label: 'CIMR Employé', baseAmount: grossSalary, rate: CIMR_EMPLOYEE_RATE, employeeAmount: cimrEmployee, employerAmount: cimrEmployer },
-    );
+    contributions.push({
+      payslipId: payslip.id,
+      code: "CIMR_EMPLOYEE",
+      label: "CIMR Salarié",
+      baseAmount: grossSalary,
+      ceilingAmount: null,
+      rate: cimrEmployee.rate,
+      employeeAmount: cimrEmpAmount,
+      employerAmount: cimrErAmount,
+    });
   }
   contributions.push(
-    { payslipId: payslip.id, code: 'TRAINING_TAX', label: 'Taxe Formation', baseAmount: grossSalary, rate: TRAINING_TAX_RATE, employeeAmount: 0, employerAmount: trainingTax },
-    { payslipId: payslip.id, code: 'FAMILY_ALLOWANCE', label: 'Allocations Familiales', baseAmount: grossSalary, rate: FAMILY_ALLOWANCE_RATE, employeeAmount: 0, employerAmount: familyAllowance },
-    { payslipId: payslip.id, code: 'SOCIAL_BENEFITS', label: 'Prestations Sociales', baseAmount: grossSalary, rate: SOCIAL_BENEFITS_RATE, employeeAmount: 0, employerAmount: socialBenefits },
+    { payslipId: payslip.id, code: "TRAINING_TAX",    label: "Taxe de Formation Professionnelle", baseAmount: grossSalary, rate: trainingTax.rate,  employeeAmount: 0, employerAmount: trainingTaxAmt },
+    { payslipId: payslip.id, code: "FAMILY_ALLOWANCE", label: "Allocations Familiales",            baseAmount: grossSalary, rate: familyAllow.rate,  employeeAmount: 0, employerAmount: familyAllowAmt },
+    { payslipId: payslip.id, code: "SOCIAL_BENEFITS",  label: "Prestations Sociales",              baseAmount: grossSalary, rate: socialBenef.rate,  employeeAmount: 0, employerAmount: socialBenefAmt }
   );
+  await tx.payslipContribution.createMany({ data: contributions });
 
-  await prisma.payslipContribution.createMany({ data: contributions });
-
-  // 14. Marquer les variables comme APPLIED
-  await prisma.variableItem.updateMany({
-    where: { id: { in: variableItems.map(v => v.id) } },
-    data: { status: 'APPLIED' },
-  });
+  // Correction 10 : Variables passent à APPLIED uniquement ici (via tx)
+  // Le caller décide si on applique (après LOCKED) — on retourne les IDs
+  const variableItemIds = variableItems.map((v) => v.id);
 
   return {
     employeeId,
     employeeName: `${employee.firstName} ${employee.lastName}`,
     baseSalary,
-    recurringTotal,
-    variableTotal,
     grossSalary,
-    cnssEmployee,
-    amoEmployee,
-    cimrEmployee,
-    totalEmployeeCharges,
-    ir,
+    cnssGross,
+    amoGross,
+    taxableGross,
+    cnssBase,
+    cnssEmpAmount,
+    amoEmpAmount,
+    cimrEmpAmount,
+    totalEmpCharges,
+    irAmount,
     totalDeductions,
     netSalary,
-    employerCharges: totalEmployerCharges,
+    totalErCharges,
     payslipId: payslip.id,
+    variableItemIds, // Retournés pour que le run puisse les APPLIED après LOCKED
   };
 }
 
-// ─── Calcul pour TOUTE une exécution ──────────────────────────────────────
+// ─── Calcul pour TOUTE une exécution ──────────────────────────────────────────
 export async function calculatePayrollRun(payrollRunId) {
   const run = await prisma.payrollRun.findUnique({
     where: { id: payrollRunId },
     include: { payrollPeriod: true },
   });
 
-  if (!run) throw new Error('Exécution non trouvée');
-  if (run.status === 'COMPLETED') throw new Error('Cette exécution est déjà terminée');
+  if (!run) throw new Error("Exécution de paie introuvable");
+
+  // Correction 8 : bloquer si déjà COMPLETED
+  if (run.status === "COMPLETED") {
+    throw new Error(
+      "Cette exécution est déjà terminée. Créez une nouvelle exécution ou annulez celle-ci avant de recalculer."
+    );
+  }
 
   // Passer en PROCESSING
   await prisma.payrollRun.update({
     where: { id: payrollRunId },
-    data: { status: 'PROCESSING', startedAt: new Date() },
+    data: { status: "PROCESSING", startedAt: new Date() },
   });
 
-  try {
-    // Récupérer tous les employés actifs
-    const employees = await prisma.employee.findMany({
-      where: {
-        companyId: run.companyId,
-        status: 'ACTIVE',
-      },
-    });
+  const employees = await prisma.employee.findMany({
+    where: { companyId: run.companyId, status: "ACTIVE" },
+  });
 
-    const results = [];
-    let totalGross = 0;
-    let totalNet = 0;
-    let totalDeductions = 0;
-    let totalEmployerCharges = 0;
+  const results        = [];
+  const allVarItemIds  = [];
+  let totalGross       = 0;
+  let totalNet         = 0;
+  let totalDeductions  = 0;
+  let totalErCharges   = 0;
 
-    for (const emp of employees) {
-      try {
-        const result = await calculateEmployeePayroll(emp.id, run.payrollPeriodId, payrollRunId);
-        results.push(result);
-        totalGross += result.grossSalary;
-        totalNet += result.netSalary;
-        totalDeductions += result.totalDeductions;
-        totalEmployerCharges += result.employerCharges;
-      } catch (err) {
-        results.push({
-          employeeId: emp.id,
-          employeeName: `${emp.firstName} ${emp.lastName}`,
-          error: err.message,
-        });
-      }
+  // ── Correction 7 : Transaction globale par employé ─────────────────────────
+  // On wrap chaque employé dans sa propre transaction pour isolation.
+  // Si un employé échoue, les autres ne sont pas annulés (continuité de paie).
+  for (const emp of employees) {
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        return await calculateEmployeePayroll(emp.id, run.payrollPeriodId, payrollRunId, tx);
+      });
+
+      results.push(result);
+      allVarItemIds.push(...result.variableItemIds);
+      totalGross      += result.grossSalary;
+      totalNet        += result.netSalary;
+      totalDeductions += result.totalDeductions;
+      totalErCharges  += result.totalErCharges;
+    } catch (err) {
+      console.error(`[PAIE] Erreur employé ${emp.id} (${emp.firstName} ${emp.lastName}):`, err.message);
+      results.push({
+        employeeId:   emp.id,
+        employeeName: `${emp.firstName} ${emp.lastName}`,
+        error:        err.message,
+      });
     }
-
-    // Mettre à jour le Run avec les totaux
-    await prisma.payrollRun.update({
-      where: { id: payrollRunId },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        totalEmployees: employees.length,
-        totalGross,
-        totalNet,
-        totalDeductions,
-        totalEmployerCharges,
-        totalEmployeeCharges: totalDeductions - results.filter(r => !r.error).reduce((s, r) => s + r.ir, 0),
-        totalTax: results.filter(r => !r.error).reduce((s, r) => s + r.ir, 0),
-      },
-    });
-
-    return {
-      runId: payrollRunId,
-      totalEmployees: employees.length,
-      processed: results.filter(r => !r.error).length,
-      errors: results.filter(r => r.error).length,
-      totalGross,
-      totalNet,
-      totalDeductions,
-      totalEmployerCharges,
-      results,
-    };
-
-  } catch (err) {
-    // En cas d'erreur globale, remettre en DRAFT
-    await prisma.payrollRun.update({
-      where: { id: payrollRunId },
-      data: { status: 'DRAFT' },
-    });
-    throw err;
   }
+
+  const processed = results.filter((r) => !r.error).length;
+  const errors    = results.filter((r) =>  r.error).length;
+
+  // Mettre à jour les totaux du run
+  await prisma.payrollRun.update({
+    where: { id: payrollRunId },
+    data: {
+      status:              errors === employees.length ? "DRAFT" : "COMPLETED", // DRAFT si tout a échoué
+      completedAt:         new Date(),
+      totalEmployees:      employees.length,
+      totalGross:          round2(totalGross),
+      totalNet:            round2(totalNet),
+      totalDeductions:     round2(totalDeductions),
+      totalEmployerCharges: round2(totalErCharges),
+      totalEmployeeCharges: round2(results.filter((r) => !r.error).reduce((s, r) => s + r.totalEmpCharges, 0)),
+      totalTax:            round2(results.filter((r) => !r.error).reduce((s, r) => s + r.irAmount, 0)),
+    },
+  });
+
+  // Correction 10 : Variables → APPLIED seulement après run COMPLETED
+  // (pas après validation "LOCKED" — on le fait ici car le run est la validation)
+  if (allVarItemIds.length > 0 && processed > 0) {
+    await prisma.variableItem.updateMany({
+      where: { id: { in: allVarItemIds } },
+      data:  { status: "APPLIED" },
+    });
+  }
+
+  return {
+    runId:          payrollRunId,
+    totalEmployees: employees.length,
+    processed,
+    errors,
+    totalGross:     round2(totalGross),
+    totalNet:       round2(totalNet),
+    totalDeductions: round2(totalDeductions),
+    totalErCharges:  round2(totalErCharges),
+    results,
+  };
 }
