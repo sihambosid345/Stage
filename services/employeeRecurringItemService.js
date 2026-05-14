@@ -41,10 +41,12 @@ export const createRecurringItem = async (data) => {
       type: data.type,
       valueType: data.valueType || 'FIXED',
       label: data.label,
+      code: data.code || null,
       effectiveFrom: new Date(data.effectiveFrom),
       isActive: data.isActive !== undefined ? data.isActive : true,
-      isTaxable: data.isTaxable || false,
+      isTaxable: data.isTaxable !== undefined ? data.isTaxable : true,
       isCnssApplicable: data.isCnssApplicable || false,
+      isAmoApplicable: data.isAmoApplicable || false,
     };
     
     // Add optional fields

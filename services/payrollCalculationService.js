@@ -316,7 +316,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
       isDeduction: mapping.isDeduction,
       taxable: item.isTaxable,
       cnssApplicable: item.isCnssApplicable,
-      amoApplicable: item.isCnssApplicable, // même flag par convention (Correction 6)
+      amoApplicable: item.isAmoApplicable || item.isCnssApplicable,
       sortOrder: 10,
       metadata: { recurringItemId: item.id, valueType: item.valueType },
     });
@@ -347,7 +347,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
       isDeduction: mapping.isDeduction,
       taxable: item.isTaxable,
       cnssApplicable: item.isCnssApplicable,
-      amoApplicable: item.isCnssApplicable,
+      amoApplicable: item.isAmoApplicable || item.isCnssApplicable,
       sortOrder: 20,
       variableItemId: item.id,
       metadata: { variableItemId: item.id, type: item.type, valueType: item.valueType },
@@ -654,40 +654,41 @@ export async function calculatePayrollRun(payrollRunId) {
       totalErCharges  += result.totalErCharges;
     }
 
-  const processed = results.length;
-  const errors    = 0;
+    const processed = results.length;
+    const errors    = 0;
 
-  await tx.payrollRun.update({
-    where: { id: payrollRunId },
-    data: {
-      status:               "COMPLETED",
-      completedAt:          new Date(),
-      totalEmployees:       employees.length,
-      totalGross:           round2(totalGross),
-      totalNet:             round2(totalNet),
-      totalDeductions:      round2(totalDeductions),
-      totalEmployerCharges: round2(totalErCharges),
-      totalEmployeeCharges: round2(results.reduce((s, r) => s + r.totalEmpCharges, 0)),
-      totalTax:             round2(results.reduce((s, r) => s + r.irAmount, 0)),
-    },
-  });
-
-  if (allVarItemIds.length > 0) {
-    await tx.variableItem.updateMany({
-      where: { id: { in: allVarItemIds } },
-      data:  { status: "APPLIED" },
+    await tx.payrollRun.update({
+      where: { id: payrollRunId },
+      data: {
+        status:               "COMPLETED",
+        completedAt:          new Date(),
+        totalEmployees:       employees.length,
+        totalGross:           round2(totalGross),
+        totalNet:             round2(totalNet),
+        totalDeductions:      round2(totalDeductions),
+        totalEmployerCharges: round2(totalErCharges),
+        totalEmployeeCharges: round2(results.reduce((s, r) => s + r.totalEmpCharges, 0)),
+        totalTax:             round2(results.reduce((s, r) => s + r.irAmount, 0)),
+      },
     });
-  }
 
-  return {
-    runId:          payrollRunId,
-    totalEmployees: employees.length,
-    processed,
-    errors,
-    totalGross:     round2(totalGross),
-    totalNet:       round2(totalNet),
-    totalDeductions: round2(totalDeductions),
-    totalErCharges:  round2(totalErCharges),
-    results,
-  };
-});
+    if (allVarItemIds.length > 0) {
+      await tx.variableItem.updateMany({
+        where: { id: { in: allVarItemIds } },
+        data:  { status: "APPLIED" },
+      });
+    }
+
+    return {
+      runId:          payrollRunId,
+      totalEmployees: employees.length,
+      processed,
+      errors,
+      totalGross:     round2(totalGross),
+      totalNet:       round2(totalNet),
+      totalDeductions: round2(totalDeductions),
+      totalErCharges:  round2(totalErCharges),
+      results,
+    };
+  });
+}

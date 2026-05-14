@@ -24,27 +24,6 @@ const includeRelations = {
   },
 };
 
-const parseDates = (data) => {
-  const result = { ...data };
-  
-  if (data.effectiveDate) {
-    const date = new Date(data.effectiveDate);
-    if (isNaN(date.getTime())) {
-      throw { status: 400, message: "Invalid effectiveDate format" };
-    }
-    result.effectiveDate = date;
-  }
-  
-  // Remove undefined values
-  Object.keys(result).forEach(key => {
-    if (result[key] === undefined) {
-      delete result[key];
-    }
-  });
-  
-  return result;
-};
-
 export const createVariableItem = async (data) => {
   try {
     // Validate required fields
@@ -75,14 +54,27 @@ export const createVariableItem = async (data) => {
       type: data.type,
       valueType: data.valueType || 'FIXED',
       label: data.label,
+      code: data.code || null,
       amount: data.amount,
       effectiveDate: new Date(data.effectiveDate),
       status: data.status || 'PENDING',
+      isTaxable: data.isTaxable !== undefined ? data.isTaxable : true,
+      isCnssApplicable: data.isCnssApplicable || false,
+      isAmoApplicable: data.isAmoApplicable || false,
     };
     
     // Add optional fields
     if (data.payrollPeriodId) {
       createData.payrollPeriodId = data.payrollPeriodId;
+    }
+    if (data.quantity) {
+      createData.quantity = data.quantity;
+    }
+    if (data.unitValue) {
+      createData.unitValue = data.unitValue;
+    }
+    if (data.percentageValue) {
+      createData.percentageValue = data.percentageValue;
     }
     if (data.notes) {
       createData.notes = data.notes;

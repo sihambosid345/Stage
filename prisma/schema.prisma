@@ -409,7 +409,8 @@ model EmployeeRecurringItem {
   effectiveTo      DateTime?
   isActive         Boolean            @default(true)
   isCnssApplicable Boolean            @default(false)
-  isTaxable        Boolean            @default(false)
+  isTaxable        Boolean            @default(true)
+  isAmoApplicable  Boolean            @default(false)
   notes            String?
   createdById      String?
   createdAt        DateTime           @default(now())
@@ -579,6 +580,7 @@ model PayrollItem {
   amount         Decimal         @db.Decimal(12, 2)
   taxable        Boolean         @default(false)
   cnssApplicable Boolean         @default(false)
+  amoApplicable  Boolean         @default(false)
   sortOrder      Int             @default(0)
   metadata       Json?
   createdAt      DateTime        @default(now())
@@ -611,8 +613,9 @@ model VariableItem {
   status           VariableItemStatus @default(PENDING)
   notes            String?
   // NEW
-  isTaxable        Boolean            @default(false)
+  isTaxable        Boolean            @default(true)
   isCnssApplicable Boolean            @default(false)
+  isAmoApplicable  Boolean            @default(false)
   createdById      String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt

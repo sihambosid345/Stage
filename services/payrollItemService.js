@@ -82,18 +82,23 @@ export const createItem = async (data) => {
     };
   }
   
-  console.log('✅ CompanyId final:', finalCompanyId);
-  
-  // ✅ Créer avec le bon companyId
-  return await prisma.payrollItem.create({
-    data: {
+    console.log('✅ CompanyId final:', finalCompanyId);
+    
+    // ✅ Créer avec le bon companyId
+    // default amoApplicable from payload if provided, else false
+    const createData = {
       ...rest,
       companyId: finalCompanyId,  // GARANTI non-null
       payrollRunId,
       employeeId,
-    },
-    include: includeRelations,
-  });
+    };
+    if (rest.amoApplicable === undefined) {
+      createData.amoApplicable = rest.amoApplicable || false;
+    }
+    return await prisma.payrollItem.create({
+      data: createData,
+      include: includeRelations,
+    });
 };
 
 export const getItems = async () => {
