@@ -7,7 +7,7 @@
 
 import express from "express";
 import { calculatePayrollRun } from "../services/payrollCalculationService.js";
-import { getAllRates } from "../services/statutoryRateService.js";
+import { getAllRates, getActiveTaxBrackets } from "../services/StatutoryrateService .js";
 
 const router = express.Router();
 

@@ -7,602 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Company {
-  id                String                  @id @default(uuid())
-  name              String
-  legalName         String?
-  taxIdentifier     String?
-  rcNumber          String?
-  iceNumber         String?
-  cnssNumber        String?
-  email             String?
-  phone             String?
-  address           String?
-  city              String?
-  country           String?                 @default("Maroc")
-  timezone          String?                 @default("Africa/Casablanca")
-  currency          String?                 @default("MAD")
-  status            CompanyStatus           @default(ACTIVE)
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  medicalSector     Boolean?                @default(false)
-  attendanceRecords AttendanceRecord[]
-  auditLogs         AuditLog[]
-  cnssReports       CnssReport[]
-  departments       Department[]
-  employeeContracts EmployeeContract[]
-  recurringItems    EmployeeRecurringItem[]
-  employees         Employee[]
-  license           License?
-  payrollConfig     PayrollConfig?
-  payrollItems      PayrollItem[]
-  payrollPeriods    PayrollPeriod[]
-  payrollRuns       PayrollRun[]
-  payslips          Payslip[]
-  positions         Position[]
-  statutoryRates    StatutoryRate[]
-  taxBrackets       TaxBracket[]
-  users             User[]
-  variableItems     VariableItem[]
-
-  @@index([status])
-  @@map("companies")
-}
-
-model Department {
-  id          String     @id @default(uuid())
-  companyId   String
-  name        String
-  code        String?
-  description String?
-  isActive    Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employees   Employee[]
-  positions   Position[]
-
-  @@unique([companyId, name])
-  @@index([companyId, isActive])
-  @@map("departments")
-}
-
-model Position {
-  id           String      @id @default(uuid())
-  companyId    String
-  departmentId String?
-  name         String
-  code         String?
-  description  String?
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  employees    Employee[]
-  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department   Department? @relation(fields: [departmentId], references: [id])
-
-  @@unique([companyId, name])
-  @@index([companyId, departmentId, isActive])
-  @@map("positions")
-}
-
-model User {
-  id             String                  @id @default(uuid())
-  companyId      String?
-  firstName      String
-  lastName       String
-  fullName       String?
-  email          String                  @unique
-  phone          String?
-  passwordHash   String
-  permissions    String[]                @default([])
-  status         UserStatus              @default(ACTIVE)
-  lastLoginAt    DateTime?
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  isSuperAdmin   Boolean                 @default(false)
-  role           UserRole                @default(EMPLOYEE)
-  auditLogs      AuditLog[]
-  recurringItems EmployeeRecurringItem[] @relation("RecurringItemCreatedBy")
-  payrollConfigs PayrollConfig[]         @relation("PayrollConfigCreatedBy")
-  createdPeriods PayrollPeriod[]         @relation("PayrollPeriodCreatedBy")
-  approvedRuns   PayrollRun[]            @relation("PayrollRunApprovedBy")
-  createdRuns    PayrollRun[]            @relation("PayrollRunCreatedBy")
-  company        Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  variableItems  VariableItem[]          @relation("VariableItemCreatedBy")
-
-  @@unique([companyId, email])
-  @@index([role, status])
-  @@index([isSuperAdmin])
-  @@map("users")
-}
-
-model Employee {
-  id                String                  @id @default(uuid())
-  companyId         String
-  employeeCode      String?
-  firstName         String
-  lastName          String
-  fullName          String?
-  cin               String?
-  cnssNumber        String?
-  matricule         String?
-  gender            Gender?
-  birthDate         DateTime?
-  phone             String?
-  email             String?
-  address           String?
-  city              String?
-  hireDate          DateTime
-  terminationDate   DateTime?
-  status            EmployeeStatus          @default(ACTIVE)
-  departmentId      String?
-  positionId        String?
-  baseSalary        Decimal?                @db.Decimal(12, 2)
-  paymentMode       String?
-  bankName          String?
-  bankAccountNumber String?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  childrenCount     Int?                    @default(0)
-  isAmoEligible     Boolean?                @default(true)
-  isCnssDeclared    Boolean?                @default(true)
-  maritalStatus     String?
-  taxIdentifier     String?
-  attendanceRecords AttendanceRecord[]
-  cnssReportLines   CnssReportLine[]
-  contracts         EmployeeContract[]
-  recurringItems    EmployeeRecurringItem[]
-  company           Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department        Department?             @relation(fields: [departmentId], references: [id])
-  position          Position?               @relation(fields: [positionId], references: [id])
-  payrollItems      PayrollItem[]
-  payslips          Payslip[]
-  variableItems     VariableItem[]
-
-  @@unique([companyId, employeeCode])
-  @@unique([companyId, cin])
-  @@index([companyId, status])
-  @@index([companyId, departmentId])
-  @@index([companyId, positionId])
-  @@map("employees")
-}
-
-model EmployeeContract {
-  id                      String                @id @default(uuid())
-  companyId               String
-  employeeId              String
-  contractType            ContractType
-  status                  ContractStatus        @default(DRAFT)
-  startDate               DateTime
-  endDate                 DateTime?
-  baseSalary              Decimal               @db.Decimal(12, 2)
-  hoursPerMonth           Decimal?              @db.Decimal(8, 2)
-  workingDaysPerMonth     Decimal?              @db.Decimal(8, 2)
-  notes                   String?
-  createdAt               DateTime              @default(now())
-  updatedAt               DateTime              @updatedAt
-  cnssDeclaredSalary      Decimal?              @db.Decimal(12, 2)
-  representationAllowance Decimal?              @db.Decimal(12, 2)
-  seniorityAllowance      Decimal?              @db.Decimal(12, 2)
-  transportAllowance      Decimal?              @db.Decimal(12, 2)
-  baseRate                Decimal?              @db.Decimal(12, 4)
-  salaryCalculationType   SalaryCalculationType @default(MONTHLY)
-  company                 Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee                Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@index([companyId, employeeId, status])
-  @@index([employeeId, startDate, endDate])
-  @@map("employee_contracts")
-}
-
-model EmployeeRecurringItem {
-  id               String             @id @default(uuid())
-  companyId        String
-  employeeId       String
-  type             RecurringItemType
-  valueType        RecurringValueType @default(FIXED)
-  code             String?
-  label            String
-  amount           Decimal?           @db.Decimal(12, 2)
-  percentageValue  Decimal?           @db.Decimal(8, 4)
-  seniorityRules   Json?
-  effectiveFrom    DateTime           @default(now())
-  effectiveTo      DateTime?
-  isActive         Boolean            @default(true)
-  isCnssApplicable Boolean            @default(false)
-  isTaxable        Boolean            @default(false)
-  notes            String?
-  createdById      String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  company          Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy        User?              @relation("RecurringItemCreatedBy", fields: [createdById], references: [id])
-  employee         Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@index([companyId, employeeId, type])
-  @@index([companyId, isActive])
-  @@index([employeeId, effectiveFrom, effectiveTo])
-  @@map("employee_recurring_items")
-}
-
-model PayrollConfig {
-  id                      String        @id @default(uuid())
-  companyId               String        @unique
-  regime                  PayrollRegime @default(MOROCCO_STANDARD)
-  currency                String        @default("MAD")
-  weeklyHours             Decimal?      @db.Decimal(8, 2)
-  monthlyHours            Decimal?      @db.Decimal(8, 2)
-  workingDaysPerMonth     Decimal?      @db.Decimal(8, 2)
-  cnssEnabled             Boolean       @default(true)
-  amoEnabled              Boolean       @default(true)
-  irEnabled               Boolean       @default(true)
-  cimrEnabled             Boolean       @default(false)
-  defaultCnssDeclaredDays Int?          @default(26)
-  payslipTemplate         String?
-  notes                   String?
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt
-  version                 Int           @default(1)
-  isActive                Boolean       @default(true)
-  dateEffet               DateTime      @default(now())
-  overtimeHoursForRate    Decimal?      @db.Decimal(8, 2)
-  damancomEnabled         Boolean       @default(false)
-  createdById             String?
-  company                 Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy               User?         @relation("PayrollConfigCreatedBy", fields: [createdById], references: [id])
-
-  @@index([companyId, isActive])
-  @@map("payroll_configs")
-}
-
-model StatutoryRate {
-  id               String           @id @default(uuid())
-  companyId        String?
-  code             ContributionCode
-  label            String
-  rate             Decimal          @db.Decimal(8, 4)
-  ceilingAmount    Decimal?         @db.Decimal(12, 2)
-  floorAmount      Decimal?         @db.Decimal(12, 2)
-  appliesToTaxable Boolean          @default(false)
-  effectiveFrom    DateTime
-  effectiveTo      DateTime?
-  isActive         Boolean          @default(true)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  company          Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([code, effectiveFrom, effectiveTo])
-  @@index([companyId, code])
-  @@map("statutory_rates")
-}
-
-model TaxBracket {
-  id              String    @id @default(uuid())
-  companyId       String?
-  taxCode         String    @default("IR_SALAIRE")
-  annualFrom      Decimal   @db.Decimal(12, 2)
-  annualTo        Decimal?  @db.Decimal(12, 2)
-  rate            Decimal   @db.Decimal(8, 4)
-  deductionAmount Decimal   @default(0) @db.Decimal(12, 2)
-  effectiveFrom   DateTime
-  effectiveTo     DateTime?
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  company         Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([taxCode, effectiveFrom, effectiveTo])
-  @@index([companyId, taxCode])
-  @@map("tax_brackets")
-}
-
-model PayrollPeriod {
-  id            String              @id @default(uuid())
-  companyId     String
-  year          Int
-  month         Int
-  startDate     DateTime
-  endDate       DateTime
-  status        PayrollPeriodStatus @default(OPEN)
-  isLocked      Boolean             @default(false)
-  notes         String?
-  createdById   String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  type          PayrollPeriodType   @default(MONTHLY)
-  cnssReport    CnssReport?
-  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy     User?               @relation("PayrollPeriodCreatedBy", fields: [createdById], references: [id])
-  payrollRuns   PayrollRun[]
-  payslips      Payslip[]
-  variableItems VariableItem[]
-
-  @@unique([companyId, year, month])
-  @@index([companyId, status])
-  @@index([companyId, type])
-  @@map("payroll_periods")
-}
-
-model PayrollRun {
-  id                   String           @id @default(uuid())
-  companyId            String
-  payrollPeriodId      String
-  runNumber            Int              @default(1)
-  status               PayrollRunStatus @default(DRAFT)
-  totalEmployees       Int              @default(0)
-  totalGross           Decimal          @default(0) @db.Decimal(14, 2)
-  totalDeductions      Decimal          @default(0) @db.Decimal(14, 2)
-  totalNet             Decimal          @default(0) @db.Decimal(14, 2)
-  createdById          String?
-  approvedById         String?
-  approvedAt           DateTime?
-  startedAt            DateTime?
-  completedAt          DateTime?
-  notes                String?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  totalEmployeeCharges Decimal          @default(0) @db.Decimal(14, 2)
-  totalEmployerCharges Decimal          @default(0) @db.Decimal(14, 2)
-  totalTax             Decimal          @default(0) @db.Decimal(14, 2)
-  payrollItems         PayrollItem[]
-  approvedBy           User?            @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id])
-  company              Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy            User?            @relation("PayrollRunCreatedBy", fields: [createdById], references: [id])
-  payrollPeriod        PayrollPeriod    @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  payslips             Payslip[]
-
-  @@unique([payrollPeriodId, runNumber])
-  @@index([companyId, payrollPeriodId, status])
-  @@map("payroll_runs")
-}
-
-model PayrollItem {
-  id             String          @id @default(uuid())
-  companyId      String
-  payrollRunId   String
-  employeeId     String
-  itemType       PayrollItemType
-  code           String?
-  label          String
-  quantity       Decimal?        @db.Decimal(10, 2)
-  rate           Decimal?        @db.Decimal(12, 2)
-  amount         Decimal         @db.Decimal(12, 2)
-  taxable        Boolean         @default(false)
-  cnssApplicable Boolean         @default(false)
-  sortOrder      Int             @default(0)
-  metadata       Json?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  payrollRun     PayrollRun      @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-
-  @@index([companyId, payrollRunId])
-  @@index([employeeId, itemType])
-  @@map("payroll_items")
-}
-
-model VariableItem {
-  id               String             @id @default(uuid())
-  companyId        String
-  employeeId       String
-  type             VariableItemType
-  valueType        VariableValueType  @default(FIXED)
-  code             String?
-  label            String
-  quantity         Decimal?           @db.Decimal(10, 2)
-  unitValue        Decimal?           @db.Decimal(12, 2)
-  percentageValue  Decimal?           @db.Decimal(8, 2)
-  amount           Decimal            @db.Decimal(12, 2)
-  effectiveDate    DateTime
-  payrollPeriodId  String?
-  status           VariableItemStatus @default(PENDING)
-  notes            String?
-  createdById      String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  isCnssApplicable Boolean            @default(false)
-  isTaxable        Boolean            @default(false)
-  company          Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdBy        User?              @relation("VariableItemCreatedBy", fields: [createdById], references: [id])
-  employee         Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  payrollPeriod    PayrollPeriod?     @relation(fields: [payrollPeriodId], references: [id])
-
-  @@index([companyId, employeeId, type])
-  @@index([companyId, effectiveDate, status])
-  @@index([payrollPeriodId])
-  @@map("variable_items")
-}
-
-model AttendanceRecord {
-  id            String           @id @default(uuid())
-  companyId     String
-  employeeId    String
-  date          DateTime
-  status        AttendanceStatus
-  workedHours   Decimal?         @db.Decimal(8, 2)
-  overtimeHours Decimal?         @db.Decimal(8, 2)
-  lateMinutes   Int?
-  notes         String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee      Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@unique([employeeId, date])
-  @@index([companyId, date])
-  @@map("attendance_records")
-}
-
-model Payslip {
-  id                   String                @id @default(uuid())
-  companyId            String
-  employeeId           String
-  payrollPeriodId      String
-  payrollRunId         String?
-  status               PayslipStatus         @default(DRAFT)
-  grossSalary          Decimal               @default(0) @db.Decimal(12, 2)
-  totalAllowances      Decimal               @default(0) @db.Decimal(12, 2)
-  totalBonuses         Decimal               @default(0) @db.Decimal(12, 2)
-  totalDeductions      Decimal               @default(0) @db.Decimal(12, 2)
-  totalAdvances        Decimal               @default(0) @db.Decimal(12, 2)
-  totalTax             Decimal               @default(0) @db.Decimal(12, 2)
-  totalCnss            Decimal               @default(0) @db.Decimal(12, 2)
-  netSalary            Decimal               @default(0) @db.Decimal(12, 2)
-  currency             String?               @default("MAD")
-  pdfPath              String?
-  pdfGeneratedAt       DateTime?
-  sentAt               DateTime?
-  snapshotData         Json?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  amoBase              Decimal               @default(0) @db.Decimal(12, 2)
-  cnssBase             Decimal               @default(0) @db.Decimal(12, 2)
-  cnssCeilingApplied   Decimal?              @db.Decimal(12, 2)
-  declaredDays         Int?                  @default(26)
-  employeeChargesTotal Decimal               @default(0) @db.Decimal(12, 2)
-  employerChargesTotal Decimal               @default(0) @db.Decimal(12, 2)
-  incomeTaxAmount      Decimal               @default(0) @db.Decimal(12, 2)
-  incomeTaxBase        Decimal               @default(0) @db.Decimal(12, 2)
-  taxableGross         Decimal               @default(0) @db.Decimal(12, 2)
-  contributions        PayslipContribution[]
-  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee             Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  payrollPeriod        PayrollPeriod         @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  payrollRun           PayrollRun?           @relation(fields: [payrollRunId], references: [id])
-
-  @@unique([employeeId, payrollPeriodId])
-  @@index([companyId, payrollPeriodId, status])
-  @@map("payslips")
-}
-
-model PayslipContribution {
-  id             String   @id @default(uuid())
-  payslipId      String
-  code           String
-  label          String
-  baseAmount     Decimal  @default(0) @db.Decimal(12, 2)
-  ceilingAmount  Decimal? @db.Decimal(12, 2)
-  rate           Decimal  @default(0) @db.Decimal(8, 4)
-  employeeAmount Decimal  @default(0) @db.Decimal(12, 2)
-  employerAmount Decimal  @default(0) @db.Decimal(12, 2)
-  metadata       Json?
-  createdAt      DateTime @default(now())
-  payslip        Payslip  @relation(fields: [payslipId], references: [id], onDelete: Cascade)
-
-  @@index([payslipId, code])
-  @@map("payslip_contributions")
-}
-
-model CnssReport {
-  id                 String           @id @default(uuid())
-  companyId          String
-  payrollPeriodId    String           @unique
-  status             CnssReportStatus @default(DRAFT)
-  affiliationNumber  String?
-  totalDeclaredDays  Int              @default(0)
-  totalGrossSalary   Decimal          @default(0) @db.Decimal(14, 2)
-  totalCnssBase      Decimal          @default(0) @db.Decimal(14, 2)
-  totalEmployeeShare Decimal          @default(0) @db.Decimal(14, 2)
-  totalEmployerShare Decimal          @default(0) @db.Decimal(14, 2)
-  totalAmo           Decimal          @default(0) @db.Decimal(14, 2)
-  totalTrainingTax   Decimal          @default(0) @db.Decimal(14, 2)
-  pdfPath            String?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  lines              CnssReportLine[]
-  company            Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payrollPeriod      PayrollPeriod    @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-
-  @@unique([companyId, payrollPeriodId])
-  @@map("cnss_reports")
-}
-
-model CnssReportLine {
-  id                String     @id @default(uuid())
-  reportId          String
-  employeeId        String
-  cnssNumber        String?
-  employeeName      String
-  matricule         String?
-  declaredDays      Int        @default(0)
-  grossSalary       Decimal    @default(0) @db.Decimal(12, 2)
-  realBase          Decimal    @default(0) @db.Decimal(12, 2)
-  ceilingBase       Decimal?   @db.Decimal(12, 2)
-  employeeShare     Decimal    @default(0) @db.Decimal(12, 2)
-  employerShare     Decimal    @default(0) @db.Decimal(12, 2)
-  amoAmount         Decimal    @default(0) @db.Decimal(12, 2)
-  trainingTaxAmount Decimal    @default(0) @db.Decimal(12, 2)
-  metadata          Json?
-  createdAt         DateTime   @default(now())
-  employee          Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  report            CnssReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-
-  @@index([reportId])
-  @@index([employeeId])
-  @@map("cnss_report_lines")
-}
-
-model License {
-  id               String          @id @default(uuid())
-  companyId        String          @unique
-  planCode         LicensePlanCode
-  status           LicenseStatus   @default(TRIAL)
-  billingCycle     BillingCycle    @default(MONTHLY)
-  maxUsers         Int?
-  maxEmployees     Int?
-  maxStorageMb     Int?
-  payrollEnabled   Boolean         @default(true)
-  rhEnabled        Boolean         @default(true)
-  cnssEnabled      Boolean         @default(false)
-  taxEnabled       Boolean         @default(false)
-  damancomEnabled  Boolean         @default(false)
-  startsAt         DateTime
-  endsAt           DateTime?
-  lastRenewedAt    DateTime?
-  notes            String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  cimrEnabled      Boolean         @default(false)
-  availableRegimes String[]        @default(["MOROCCO_STANDARD"])
-  company          Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@index([status, planCode])
-  @@index([startsAt, endsAt])
-  @@map("licenses")
-}
-
-model AuditLog {
-  id          String   @id @default(uuid())
-  companyId   String
-  userId      String?
-  action      String
-  entityType  String
-  entityId    String?
-  description String?
-  metadata    Json?
-  createdAt   DateTime @default(now())
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user        User?    @relation(fields: [userId], references: [id])
-
-  @@index([companyId, entityType, entityId])
-  @@index([companyId, action, createdAt])
-  @@map("audit_logs")
-}
+// --- Enums ---
 
 enum CompanyStatus {
   ACTIVE
   INACTIVE
   SUSPENDED
 }
-
 enum UserStatus {
   ACTIVE
   INACTIVE
   BLOCKED
 }
-
 enum UserRole {
   SUPER_ADMIN
   ADMIN
@@ -611,19 +27,16 @@ enum UserRole {
   EMPLOYEE
   VIEWER
 }
-
 enum EmployeeStatus {
   ACTIVE
   INACTIVE
   SUSPENDED
   LEFT
 }
-
 enum Gender {
   MALE
   FEMALE
 }
-
 enum ContractType {
   CDI
   CDD
@@ -632,7 +45,6 @@ enum ContractType {
   FREELANCE
   OTHER
 }
-
 enum ContractStatus {
   DRAFT
   ACTIVE
@@ -641,26 +53,24 @@ enum ContractStatus {
   TERMINATED
 }
 
+// NEW
 enum SalaryCalculationType {
   MONTHLY
   DAILY
   HOURLY
   MISSION
 }
-
 enum PayrollPeriodType {
   MONTHLY
   WEEKLY
   CUSTOM
 }
-
 enum PayrollPeriodStatus {
   OPEN
   PROCESSING
   CLOSED
   LOCKED
 }
-
 enum PayrollRunStatus {
   DRAFT
   PROCESSING
@@ -677,17 +87,12 @@ enum PayrollItemType {
   ADVANCE
   TAX
   CNSS
-  OTHER
   AMO
+  OTHER
 }
 
+// EXTENDED: variable types
 enum VariableItemType {
-  ALLOWANCE
-  BONUS
-  DEDUCTION
-  ADVANCE
-  OVERTIME
-  OTHER
   COMMISSION
   FRAIS
   AVANCE
@@ -701,7 +106,6 @@ enum VariableValueType {
   HOURS
   DAYS
 }
-
 enum VariableItemStatus {
   PENDING
   APPROVED
@@ -710,6 +114,7 @@ enum VariableItemStatus {
   CANCELLED
 }
 
+// NEW: recurring items
 enum RecurringItemType {
   TRANSPORT
   ANCIENNETE
@@ -720,7 +125,6 @@ enum RecurringItemType {
   PANIER
   OTHER
 }
-
 enum RecurringValueType {
   FIXED
   PERCENTAGE
@@ -736,7 +140,6 @@ enum AttendanceStatus {
   HOLIDAY
   OTHER
 }
-
 enum PayslipStatus {
   DRAFT
   GENERATED
@@ -750,7 +153,6 @@ enum LicensePlanCode {
   BUSINESS
   ENTERPRISE
 }
-
 enum LicenseStatus {
   TRIAL
   ACTIVE
@@ -758,13 +160,13 @@ enum LicenseStatus {
   SUSPENDED
   CANCELLED
 }
-
 enum BillingCycle {
   MONTHLY
   YEARLY
   LIFETIME
 }
 
+// EXTENDED: regimes
 enum PayrollRegime {
   MOROCCO_STANDARD
   MAROC_TRANSPORT
@@ -790,4 +192,623 @@ enum CnssReportStatus {
   GENERATED
   VALIDATED
   EXPORTED
+}
+
+// --- Models ---
+
+model Company {
+  id            String        @id @default(uuid())
+  name          String
+  legalName     String?
+  taxIdentifier String?
+  rcNumber      String?
+  iceNumber     String?
+  cnssNumber    String?
+  email         String?
+  phone         String?
+  address       String?
+  city          String?
+  country       String?       @default("Maroc")
+  timezone      String?       @default("Africa/Casablanca")
+  currency      String?       @default("MAD")
+  medicalSector Boolean?      @default(false)
+  status        CompanyStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  users             User[]
+  employees         Employee[]
+  departments       Department[]
+  positions         Position[]
+  payrollPeriods    PayrollPeriod[]
+  payrollRuns       PayrollRun[]
+  variableItems     VariableItem[]
+  attendanceRecords AttendanceRecord[]
+  payslips          Payslip[]
+  license           License?
+  auditLogs         AuditLog[]
+  payrollConfig     PayrollConfig?
+  statutoryRates    StatutoryRate[]
+  taxBrackets       TaxBracket[]
+  cnssReports       CnssReport[]
+  employeeContracts EmployeeContract[]
+  payrollItems      PayrollItem[]
+  recurringItems    EmployeeRecurringItem[]
+
+  @@index([status])
+  @@map("companies")
+}
+
+model Department {
+  id          String     @id @default(uuid())
+  companyId   String
+  name        String
+  code        String?
+  description String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employees Employee[]
+  positions Position[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("departments")
+}
+
+model Position {
+  id           String      @id @default(uuid())
+  companyId    String
+  departmentId String?
+  name         String
+  code         String?
+  description  String?
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees  Employee[]
+
+  @@unique([companyId, name])
+  @@index([companyId, departmentId, isActive])
+  @@map("positions")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  companyId    String?
+  firstName    String
+  lastName     String
+  fullName     String?
+  email        String    @unique
+  phone        String?
+  passwordHash String
+  role         UserRole  @default(EMPLOYEE)
+  permissions  String[]  @default([])
+  status       UserStatus @default(ACTIVE)
+  isSuperAdmin Boolean   @default(false)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company        Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdPeriods PayrollPeriod[] @relation("PayrollPeriodCreatedBy")
+  createdRuns    PayrollRun[]    @relation("PayrollRunCreatedBy")
+  approvedRuns   PayrollRun[]    @relation("PayrollRunApprovedBy")
+  variableItems  VariableItem[]  @relation("VariableItemCreatedBy")
+  recurringItems EmployeeRecurringItem[] @relation("RecurringItemCreatedBy")
+  auditLogs      AuditLog[]
+  payrollConfigs PayrollConfig[] @relation("PayrollConfigCreatedBy")
+
+  @@unique([companyId, email])
+  @@index([role, status])
+  @@index([isSuperAdmin])
+  @@map("users")
+}
+
+model Employee {
+  id                String         @id @default(uuid())
+  companyId         String
+  employeeCode      String?
+  firstName         String
+  lastName          String
+  fullName          String?
+  cin               String?
+  cnssNumber        String?
+  matricule         String?
+  taxIdentifier     String?
+  gender            Gender?
+  birthDate         DateTime?
+  maritalStatus     String?
+  childrenCount     Int?           @default(0)
+  phone             String?
+  email             String?
+  address           String?
+  city              String?
+  hireDate          DateTime
+  terminationDate   DateTime?
+  status            EmployeeStatus @default(ACTIVE)
+  departmentId      String?
+  positionId        String?
+  baseSalary        Decimal?       @db.Decimal(12, 2)
+  paymentMode       String?
+  bankName          String?
+  bankAccountNumber String?
+  isCnssDeclared    Boolean?       @default(true)
+  isAmoEligible     Boolean?       @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department        Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position          Position?      @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  contracts         EmployeeContract[]
+  variableItems     VariableItem[]
+  recurringItems    EmployeeRecurringItem[]
+  attendanceRecords AttendanceRecord[]
+  payrollItems      PayrollItem[]
+  payslips          Payslip[]
+  cnssReportLines   CnssReportLine[]
+
+  @@unique([companyId, employeeCode])
+  @@unique([companyId, cin])
+  @@index([companyId, status])
+  @@index([companyId, departmentId])
+  @@index([companyId, positionId])
+  @@map("employees")
+}
+
+model EmployeeContract {
+  id                      String                @id @default(uuid())
+  companyId               String
+  employeeId              String
+  contractType            ContractType
+  status                  ContractStatus        @default(DRAFT)
+  // NEW
+  salaryCalculationType   SalaryCalculationType @default(MONTHLY)
+  startDate               DateTime
+  endDate                 DateTime?
+  baseSalary              Decimal               @db.Decimal(12, 2)
+  // NEW: hourly/daily/flat rate depending on type
+  baseRate                Decimal?              @db.Decimal(12, 4)
+  hoursPerMonth           Decimal?              @db.Decimal(8, 2)
+  workingDaysPerMonth     Decimal?              @db.Decimal(8, 2)
+  cnssDeclaredSalary      Decimal?              @db.Decimal(12, 2)
+  transportAllowance      Decimal?              @db.Decimal(12, 2)
+  representationAllowance Decimal?              @db.Decimal(12, 2)
+  seniorityAllowance      Decimal?              @db.Decimal(12, 2)
+  notes                   String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+
+  @@index([companyId, employeeId, status])
+  @@index([employeeId, startDate, endDate])
+  @@map("employee_contracts")
+}
+
+// NEW: per-employee recurring items
+model EmployeeRecurringItem {
+  id               String             @id @default(uuid())
+  companyId        String
+  employeeId       String
+  type             RecurringItemType
+  valueType        RecurringValueType @default(FIXED)
+  code             String?
+  label            String
+  amount           Decimal?           @db.Decimal(12, 2)
+  percentageValue  Decimal?           @db.Decimal(8, 4)
+  seniorityRules   Json?
+  effectiveFrom    DateTime           @default(now())
+  effectiveTo      DateTime?
+  isActive         Boolean            @default(true)
+  isCnssApplicable Boolean            @default(false)
+  isTaxable        Boolean            @default(false)
+  notes            String?
+  createdById      String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  company   Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("RecurringItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([companyId, employeeId, type])
+  @@index([companyId, isActive])
+  @@index([employeeId, effectiveFrom, effectiveTo])
+  @@map("employee_recurring_items")
+}
+
+model PayrollConfig {
+  id                      String        @id @default(uuid())
+  companyId               String        @unique
+  // NEW fields
+  version                 Int           @default(1)
+  isActive                Boolean       @default(true)
+  dateEffet               DateTime      @default(now())
+  regime                  PayrollRegime @default(MOROCCO_STANDARD)
+  currency                String        @default("MAD")
+  weeklyHours             Decimal?      @db.Decimal(8, 2)
+  monthlyHours            Decimal?      @db.Decimal(8, 2)
+  // Heures sup. ajoutees au denominateur du taux horaire : salaire / (monthlyHours + ce champ)
+  overtimeHoursForRate    Decimal?      @db.Decimal(8, 2)
+  workingDaysPerMonth     Decimal?      @db.Decimal(8, 2)
+  // modules (source of truth = License, these flags = cache)
+  cnssEnabled             Boolean       @default(true)
+  amoEnabled              Boolean       @default(true)
+  irEnabled               Boolean       @default(true)
+  cimrEnabled             Boolean       @default(false)
+  damancomEnabled         Boolean       @default(false)
+  defaultCnssDeclaredDays Int?          @default(26)
+  payslipTemplate         String?
+  notes                   String?
+  createdById             String?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  company   Company @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  createdBy User?   @relation("PayrollConfigCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([companyId, isActive])
+  @@map("payroll_configs")
+}
+
+model StatutoryRate {
+  id               String           @id @default(uuid())
+  companyId        String?
+  code             ContributionCode
+  label            String
+  rate             Decimal          @db.Decimal(8, 4)
+  ceilingAmount    Decimal?         @db.Decimal(12, 2)
+  floorAmount      Decimal?         @db.Decimal(12, 2)
+  appliesToTaxable Boolean          @default(false)
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([code, effectiveFrom, effectiveTo])
+  @@index([companyId, code])
+  @@map("statutory_rates")
+}
+
+model TaxBracket {
+  id              String    @id @default(uuid())
+  companyId       String?
+  taxCode         String    @default("IR_SALAIRE")
+  annualFrom      Decimal   @db.Decimal(12, 2)
+  annualTo        Decimal?  @db.Decimal(12, 2)
+  rate            Decimal   @db.Decimal(8, 4)
+  deductionAmount Decimal   @default(0) @db.Decimal(12, 2)
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([taxCode, effectiveFrom, effectiveTo])
+  @@index([companyId, taxCode])
+  @@map("tax_brackets")
+}
+
+model PayrollPeriod {
+  id          String              @id @default(uuid())
+  companyId   String
+  year        Int
+  month       Int
+  // NEW
+  type        PayrollPeriodType   @default(MONTHLY)
+  startDate   DateTime
+  endDate     DateTime
+  // NEW: extended status
+  status      PayrollPeriodStatus @default(OPEN)
+  isLocked    Boolean             @default(false)
+  notes       String?
+  createdById String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  company     Company       @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  createdBy   User?         @relation("PayrollPeriodCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  payrollRuns PayrollRun[]
+  payslips    Payslip[]
+  variableItems VariableItem[]
+  cnssReport  CnssReport?
+
+  @@unique([companyId, year, month])
+  @@index([companyId, status])
+  @@index([companyId, type])
+  @@map("payroll_periods")
+}
+
+model PayrollRun {
+  id                   String           @id @default(uuid())
+  companyId            String
+  payrollPeriodId      String
+  runNumber            Int              @default(1)
+  status               PayrollRunStatus @default(DRAFT)
+  totalEmployees       Int              @default(0)
+  totalGross           Decimal          @default(0) @db.Decimal(14, 2)
+  totalDeductions      Decimal          @default(0) @db.Decimal(14, 2)
+  totalNet             Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployerCharges Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployeeCharges Decimal          @default(0) @db.Decimal(14, 2)
+  totalTax             Decimal          @default(0) @db.Decimal(14, 2)
+  createdById          String?
+  approvedById         String?
+  approvedAt           DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  notes                String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  company       Company       @relation(fields: [companyId],       references: [id], onDelete: Cascade)
+  payrollPeriod PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  createdBy     User?         @relation("PayrollRunCreatedBy",  fields: [createdById],  references: [id], onDelete: SetNull)
+  approvedBy    User?         @relation("PayrollRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  payrollItems  PayrollItem[]
+  payslips      Payslip[]
+
+  @@unique([payrollPeriodId, runNumber])
+  @@index([companyId, payrollPeriodId, status])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id             String          @id @default(uuid())
+  companyId      String
+  payrollRunId   String
+  employeeId     String
+  itemType       PayrollItemType
+  code           String?
+  label          String
+  quantity       Decimal?        @db.Decimal(10, 2)
+  rate           Decimal?        @db.Decimal(12, 2)
+  amount         Decimal         @db.Decimal(12, 2)
+  taxable        Boolean         @default(false)
+  cnssApplicable Boolean         @default(false)
+  sortOrder      Int             @default(0)
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  company    Company    @relation(fields: [companyId],   references: [id], onDelete: Cascade)
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId],  references: [id], onDelete: Cascade)
+
+  @@index([companyId, payrollRunId])
+  @@index([employeeId, itemType])
+  @@map("payroll_items")
+}
+
+model VariableItem {
+  id               String             @id @default(uuid())
+  companyId        String
+  employeeId       String
+  // EXTENDED: COMMISSION | FRAIS | AVANCE | RETENUE | PRIME | ...
+  type             VariableItemType
+  valueType        VariableValueType  @default(FIXED)
+  code             String?
+  label            String
+  quantity         Decimal?           @db.Decimal(10, 2)
+  unitValue        Decimal?           @db.Decimal(12, 2)
+  percentageValue  Decimal?           @db.Decimal(8, 2)
+  amount           Decimal            @db.Decimal(12, 2)
+  effectiveDate    DateTime
+  payrollPeriodId  String?
+  status           VariableItemStatus @default(PENDING)
+  notes            String?
+  // NEW
+  isTaxable        Boolean            @default(false)
+  isCnssApplicable Boolean            @default(false)
+  createdById      String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  company       Company        @relation(fields: [companyId],     references: [id], onDelete: Cascade)
+  employee      Employee       @relation(fields: [employeeId],    references: [id], onDelete: Cascade)
+  payrollPeriod PayrollPeriod? @relation(fields: [payrollPeriodId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation("VariableItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([companyId, employeeId, type])
+  @@index([companyId, effectiveDate, status])
+  @@index([payrollPeriodId])
+  @@map("variable_items")
+}
+
+model AttendanceRecord {
+  id            String           @id @default(uuid())
+  companyId     String
+  employeeId    String
+  date          DateTime
+  status        AttendanceStatus
+  workedHours   Decimal?         @db.Decimal(8, 2)
+  overtimeHours Decimal?         @db.Decimal(8, 2)
+  lateMinutes   Int?
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  company  Company  @relation(fields: [companyId],  references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([companyId, date])
+  @@map("attendance_records")
+}
+
+model Payslip {
+  id                   String        @id @default(uuid())
+  companyId            String
+  employeeId           String
+  payrollPeriodId      String
+  payrollRunId         String?
+  status               PayslipStatus @default(DRAFT)
+  grossSalary          Decimal       @default(0) @db.Decimal(12, 2)
+  taxableGross         Decimal       @default(0) @db.Decimal(12, 2)
+  totalAllowances      Decimal       @default(0) @db.Decimal(12, 2)
+  totalBonuses         Decimal       @default(0) @db.Decimal(12, 2)
+  totalDeductions      Decimal       @default(0) @db.Decimal(12, 2)
+  totalAdvances        Decimal       @default(0) @db.Decimal(12, 2)
+  totalTax             Decimal       @default(0) @db.Decimal(12, 2)
+  totalCnss            Decimal       @default(0) @db.Decimal(12, 2)
+  netSalary            Decimal       @default(0) @db.Decimal(12, 2)
+  cnssBase             Decimal       @default(0) @db.Decimal(12, 2)
+  cnssCeilingApplied   Decimal?      @db.Decimal(12, 2)
+  amoBase              Decimal       @default(0) @db.Decimal(12, 2)
+  employerChargesTotal Decimal       @default(0) @db.Decimal(12, 2)
+  employeeChargesTotal Decimal       @default(0) @db.Decimal(12, 2)
+  incomeTaxBase        Decimal       @default(0) @db.Decimal(12, 2)
+  incomeTaxAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  declaredDays         Int?          @default(26)
+  currency             String?       @default("MAD")
+  pdfPath              String?
+  pdfGeneratedAt       DateTime?
+  sentAt               DateTime?
+  snapshotData         Json?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  company       Company               @relation(fields: [companyId],       references: [id], onDelete: Cascade)
+  employee      Employee              @relation(fields: [employeeId],      references: [id], onDelete: Cascade)
+  payrollPeriod PayrollPeriod         @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  payrollRun    PayrollRun?           @relation(fields: [payrollRunId],    references: [id], onDelete: SetNull)
+  contributions PayslipContribution[]
+
+  @@unique([employeeId, payrollPeriodId])
+  @@index([companyId, payrollPeriodId, status])
+  @@map("payslips")
+}
+
+model PayslipContribution {
+  id             String   @id @default(uuid())
+  payslipId      String
+  code           String
+  label          String
+  baseAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  ceilingAmount  Decimal? @db.Decimal(12, 2)
+  rate           Decimal  @default(0) @db.Decimal(8, 4)
+  employeeAmount Decimal  @default(0) @db.Decimal(12, 2)
+  employerAmount Decimal  @default(0) @db.Decimal(12, 2)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  payslip Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId, code])
+  @@map("payslip_contributions")
+}
+
+model CnssReport {
+  id                 String           @id @default(uuid())
+  companyId          String
+  payrollPeriodId    String           @unique
+  status             CnssReportStatus @default(DRAFT)
+  affiliationNumber  String?
+  totalDeclaredDays  Int              @default(0)
+  totalGrossSalary   Decimal          @default(0) @db.Decimal(14, 2)
+  totalCnssBase      Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployeeShare Decimal          @default(0) @db.Decimal(14, 2)
+  totalEmployerShare Decimal          @default(0) @db.Decimal(14, 2)
+  totalAmo           Decimal          @default(0) @db.Decimal(14, 2)
+  totalTrainingTax   Decimal          @default(0) @db.Decimal(14, 2)
+  pdfPath            String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  company       Company        @relation(fields: [companyId],       references: [id], onDelete: Cascade)
+  payrollPeriod PayrollPeriod  @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  lines         CnssReportLine[]
+
+  @@unique([companyId, payrollPeriodId])
+  @@map("cnss_reports")
+}
+
+model CnssReportLine {
+  id                String     @id @default(uuid())
+  reportId          String
+  employeeId        String
+  cnssNumber        String?
+  employeeName      String
+  matricule         String?
+  declaredDays      Int        @default(0)
+  grossSalary       Decimal    @default(0) @db.Decimal(12, 2)
+  realBase          Decimal    @default(0) @db.Decimal(12, 2)
+  ceilingBase       Decimal?   @db.Decimal(12, 2)
+  employeeShare     Decimal    @default(0) @db.Decimal(12, 2)
+  employerShare     Decimal    @default(0) @db.Decimal(12, 2)
+  amoAmount         Decimal    @default(0) @db.Decimal(12, 2)
+  trainingTaxAmount Decimal    @default(0) @db.Decimal(12, 2)
+  metadata          Json?
+  createdAt         DateTime   @default(now())
+
+  report   CnssReport @relation(fields: [reportId],   references: [id], onDelete: Cascade)
+  employee Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([employeeId])
+  @@map("cnss_report_lines")
+}
+
+model License {
+  id              String          @id @default(uuid())
+  companyId       String          @unique
+  planCode        LicensePlanCode
+  status          LicenseStatus   @default(TRIAL)
+  billingCycle    BillingCycle    @default(MONTHLY)
+  maxUsers        Int?
+  maxEmployees    Int?
+  maxStorageMb    Int?
+  // SOURCE OF TRUTH for modules
+  payrollEnabled  Boolean         @default(true)
+  rhEnabled       Boolean         @default(true)
+  cnssEnabled     Boolean         @default(false)
+  taxEnabled      Boolean         @default(false)
+  damancomEnabled Boolean         @default(false)
+  cimrEnabled     Boolean         @default(false)
+  // Regimes available per license
+  availableRegimes String[]       @default(["MOROCCO_STANDARD"])
+  startsAt        DateTime
+  endsAt          DateTime?
+  lastRenewedAt   DateTime?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([status, planCode])
+  @@index([startsAt, endsAt])
+  @@map("licenses")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  companyId   String
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId],    references: [id], onDelete: SetNull)
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, action, createdAt])
+  @@map("audit_logs")
 }

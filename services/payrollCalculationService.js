@@ -627,71 +627,53 @@ export async function calculatePayrollRun(payrollRunId) {
     );
   }
 
-  // Passer en PROCESSING
-  await prisma.payrollRun.update({
-    where: { id: payrollRunId },
-    data: { status: "PROCESSING", startedAt: new Date() },
-  });
-
   const employees = await prisma.employee.findMany({
     where: { companyId: run.companyId, status: "ACTIVE" },
   });
 
-  const results        = [];
-  const allVarItemIds  = [];
-  let totalGross       = 0;
-  let totalNet         = 0;
-  let totalDeductions  = 0;
-  let totalErCharges   = 0;
+  return await prisma.$transaction(async (tx) => {
+    await tx.payrollRun.update({
+      where: { id: payrollRunId },
+      data: { status: "PROCESSING", startedAt: new Date() },
+    });
 
-  // ── Correction 7 : Transaction globale par employé ─────────────────────────
-  // On wrap chaque employé dans sa propre transaction pour isolation.
-  // Si un employé échoue, les autres ne sont pas annulés (continuité de paie).
-  for (const emp of employees) {
-    try {
-      const result = await prisma.$transaction(async (tx) => {
-        return await calculateEmployeePayroll(emp.id, run.payrollPeriodId, payrollRunId, tx);
-      });
+    const results        = [];
+    const allVarItemIds  = [];
+    let totalGross       = 0;
+    let totalNet         = 0;
+    let totalDeductions  = 0;
+    let totalErCharges   = 0;
 
+    for (const emp of employees) {
+      const result = await calculateEmployeePayroll(emp.id, run.payrollPeriodId, payrollRunId, tx);
       results.push(result);
       allVarItemIds.push(...result.variableItemIds);
       totalGross      += result.grossSalary;
       totalNet        += result.netSalary;
       totalDeductions += result.totalDeductions;
       totalErCharges  += result.totalErCharges;
-    } catch (err) {
-      console.error(`[PAIE] Erreur employé ${emp.id} (${emp.firstName} ${emp.lastName}):`, err.message);
-      results.push({
-        employeeId:   emp.id,
-        employeeName: `${emp.firstName} ${emp.lastName}`,
-        error:        err.message,
-      });
     }
-  }
 
-  const processed = results.filter((r) => !r.error).length;
-  const errors    = results.filter((r) =>  r.error).length;
+  const processed = results.length;
+  const errors    = 0;
 
-  // Mettre à jour les totaux du run
-  await prisma.payrollRun.update({
+  await tx.payrollRun.update({
     where: { id: payrollRunId },
     data: {
-      status:              errors === employees.length ? "DRAFT" : "COMPLETED", // DRAFT si tout a échoué
-      completedAt:         new Date(),
-      totalEmployees:      employees.length,
-      totalGross:          round2(totalGross),
-      totalNet:            round2(totalNet),
-      totalDeductions:     round2(totalDeductions),
+      status:               "COMPLETED",
+      completedAt:          new Date(),
+      totalEmployees:       employees.length,
+      totalGross:           round2(totalGross),
+      totalNet:             round2(totalNet),
+      totalDeductions:      round2(totalDeductions),
       totalEmployerCharges: round2(totalErCharges),
-      totalEmployeeCharges: round2(results.filter((r) => !r.error).reduce((s, r) => s + r.totalEmpCharges, 0)),
-      totalTax:            round2(results.filter((r) => !r.error).reduce((s, r) => s + r.irAmount, 0)),
+      totalEmployeeCharges: round2(results.reduce((s, r) => s + r.totalEmpCharges, 0)),
+      totalTax:             round2(results.reduce((s, r) => s + r.irAmount, 0)),
     },
   });
 
-  // Correction 10 : Variables → APPLIED seulement après run COMPLETED
-  // (pas après validation "LOCKED" — on le fait ici car le run est la validation)
-  if (allVarItemIds.length > 0 && processed > 0) {
-    await prisma.variableItem.updateMany({
+  if (allVarItemIds.length > 0) {
+    await tx.variableItem.updateMany({
       where: { id: { in: allVarItemIds } },
       data:  { status: "APPLIED" },
     });
@@ -708,4 +690,4 @@ export async function calculatePayrollRun(payrollRunId) {
     totalErCharges:  round2(totalErCharges),
     results,
   };
-}
+});
