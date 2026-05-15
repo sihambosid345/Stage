@@ -513,6 +513,140 @@ api.delete("/payroll-config/:id", requireAdmin, async (req, res) => {
   }
 });
 
+// ─── StatutoryRates (Taux légaux CNSS/AMO/etc.) ───────────────────────────────
+import * as statutoryRateSvc from "./services/StatutoryrateService .js";
+
+api.get("/statutory-rates", async (req, res) => {
+  try {
+    const { companyId } = req.query;
+    const rates = await statutoryRateSvc.getAllRates(companyId || null);
+    res.json(rates);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.post("/statutory-rates", requireAdmin, async (req, res) => {
+  try {
+    const data = { ...req.body };
+    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
+    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
+    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
+    if (data.ceilingAmount !== undefined && data.ceilingAmount !== null) data.ceilingAmount = parseFloat(data.ceilingAmount);
+    const rate = await statutoryRateSvc.createRate(data);
+    res.status(201).json(rate);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+api.put("/statutory-rates/:id", requireAdmin, async (req, res) => {
+  try {
+    const data = { ...req.body };
+    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
+    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
+    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
+    if (data.ceilingAmount !== undefined && data.ceilingAmount !== null) data.ceilingAmount = parseFloat(data.ceilingAmount);
+    const rate = await statutoryRateSvc.updateRate(req.params.id, data);
+    res.json(rate);
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
+
+api.delete("/statutory-rates/:id", requireAdmin, async (req, res) => {
+  try {
+    await statutoryRateSvc.deactivateRate(req.params.id);
+    res.json({ message: "Taux désactivé avec succès" });
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
+
+// Seed des taux légaux marocains par défaut
+api.post("/statutory-rates/seed", requireAdmin, async (req, res) => {
+  try {
+    const NATIONAL_TODAY = new Date("2026-01-01");
+    const STATUTORY_RATES = [
+      { code: "CNSS_EMPLOYEE",   label: "CNSS Part Salariale (4.48%)",                  rate: 0.0448,  ceilingAmount: 6000, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "CNSS_EMPLOYER",   label: "CNSS Part Patronale (8.60%)",                  rate: 0.0860,  ceilingAmount: 6000, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "AMO_EMPLOYEE",    label: "AMO Part Salariale (1.82%)",                   rate: 0.0182,  ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "AMO_EMPLOYER",    label: "AMO Part Patronale (1.47%)",                   rate: 0.0147,  ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "TRAINING_TAX",    label: "Taxe de Formation Professionnelle (1.6%)",     rate: 0.016,   ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "FAMILY_ALLOWANCE",label: "Allocations Familiales (6.40%)",               rate: 0.064,   ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "SOCIAL_BENEFITS", label: "Prestations Sociales (0.53%)",                 rate: 0.0053,  ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { code: "CIMR_EMPLOYEE",   label: "CIMR Part Salariale (3%)",                     rate: 0.03,    ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: false },
+      { code: "CIMR_EMPLOYER",   label: "CIMR Part Patronale (3%)",                     rate: 0.03,    ceilingAmount: null, effectiveFrom: NATIONAL_TODAY, isActive: false },
+    ];
+    let created = 0;
+    for (const r of STATUTORY_RATES) {
+      const existing = await prisma.statutoryRate.findFirst({ where: { code: r.code, isActive: true } });
+      if (!existing) { await prisma.statutoryRate.create({ data: r }); created++; }
+    }
+    res.json({ message: `Seed terminé : ${created} taux créés`, created });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── TaxBrackets (Barème IR) ──────────────────────────────────────────────────
+api.get("/tax-brackets", async (req, res) => {
+  try {
+    const { companyId, taxCode = "IR_SALAIRE" } = req.query;
+    const rows = await prisma.taxBracket.findMany({
+      where: { taxCode, OR: [{ companyId: companyId || null }, { companyId: null }], isActive: true },
+      orderBy: [{ annualFrom: "asc" }],
+    });
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.post("/tax-brackets", requireAdmin, async (req, res) => {
+  try {
+    const data = { ...req.body };
+    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
+    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
+    if (data.annualFrom !== undefined) data.annualFrom = parseFloat(data.annualFrom);
+    if (data.annualTo   !== undefined && data.annualTo !== null) data.annualTo = parseFloat(data.annualTo);
+    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
+    if (data.deductionAmount !== undefined) data.deductionAmount = parseFloat(data.deductionAmount);
+    const bracket = await statutoryRateSvc.createTaxBracket(data);
+    res.status(201).json(bracket);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+api.put("/tax-brackets/:id", requireAdmin, async (req, res) => {
+  try {
+    const data = { ...req.body };
+    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
+    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
+    if (data.annualFrom !== undefined) data.annualFrom = parseFloat(data.annualFrom);
+    if (data.annualTo   !== undefined && data.annualTo !== null) data.annualTo = parseFloat(data.annualTo);
+    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
+    if (data.deductionAmount !== undefined) data.deductionAmount = parseFloat(data.deductionAmount);
+    const bracket = await statutoryRateSvc.updateTaxBracket(req.params.id, data);
+    res.json(bracket);
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
+
+api.delete("/tax-brackets/:id", requireAdmin, async (req, res) => {
+  try {
+    await statutoryRateSvc.deactivateTaxBracket(req.params.id);
+    res.json({ message: "Tranche IR désactivée avec succès" });
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
+
+// Seed du barème IR marocain 2026 par défaut
+api.post("/tax-brackets/seed", requireAdmin, async (req, res) => {
+  try {
+    const NATIONAL_TODAY = new Date("2026-01-01");
+    const TAX_BRACKETS = [
+      { taxCode: "IR_SALAIRE", annualFrom: 0,      annualTo: 30000,  rate: 0.00, deductionAmount: 0,     effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { taxCode: "IR_SALAIRE", annualFrom: 30001,  annualTo: 50000,  rate: 0.10, deductionAmount: 3000,  effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { taxCode: "IR_SALAIRE", annualFrom: 50001,  annualTo: 60000,  rate: 0.20, deductionAmount: 8000,  effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { taxCode: "IR_SALAIRE", annualFrom: 60001,  annualTo: 80000,  rate: 0.30, deductionAmount: 14000, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { taxCode: "IR_SALAIRE", annualFrom: 80001,  annualTo: 180000, rate: 0.34, deductionAmount: 17200, effectiveFrom: NATIONAL_TODAY, isActive: true },
+      { taxCode: "IR_SALAIRE", annualFrom: 180001, annualTo: null,   rate: 0.37, deductionAmount: 22600, effectiveFrom: NATIONAL_TODAY, isActive: true },
+    ];
+    let created = 0;
+    for (const b of TAX_BRACKETS) {
+      const existing = await prisma.taxBracket.findFirst({ where: { taxCode: b.taxCode, annualFrom: b.annualFrom, isActive: true } });
+      if (!existing) { await prisma.taxBracket.create({ data: b }); created++; }
+    }
+    res.json({ message: `Seed IR terminé : ${created} tranches créées`, created });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Mount API ────────────────────────────────────────────────────────────────
 app.use(api);
 
