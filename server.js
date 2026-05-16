@@ -59,7 +59,6 @@ api.use(licenseMiddleware);
 // ── Companies ────────────────────────────────────────────────────────────────
 api.post  ("/companies",      requireSuperAdmin, companyCtrl.createCompany);
 api.get   ("/companies/mine", companyCtrl.getMyCompany);
-// ✅ FIX 1 : requireAdmin au lieu de requireSuperAdmin
 // companyCtrl.getCompanies filtre déjà par companyId si pas superAdmin
 api.get   ("/companies",      requireAdmin, companyCtrl.getCompanies);
 api.get   ("/companies/:id",  companyCtrl.getCompany);
@@ -162,13 +161,78 @@ api.put   ("/payroll-periods/:id",              periodCtrl.updatePeriod);
 api.post  ("/payroll-periods/:id/close",        periodCtrl.closePeriod);
 api.delete("/payroll-periods/:id",              periodCtrl.deletePeriod);
 
-// Payroll Runs
-api.post  ("/payroll-runs",                       runCtrl.createRun);
-api.get   ("/payroll-runs",                       runCtrl.getRuns);
-api.get   ("/payroll-runs/:id",                   runCtrl.getRun);
-api.get   ("/payroll-runs/period/:periodId",      runCtrl.getRunsByPeriod);
-api.put   ("/payroll-runs/:id",                   runCtrl.updateRun);
-api.delete("/payroll-runs/:id",                   runCtrl.deleteRun);
+// Runs
+api.get   ("/payroll/runs",                          runCtrl.getRuns);
+api.post  ("/payroll/runs",                          runCtrl.createRun);
+api.get   ("/payroll/runs/:id",                      runCtrl.getRun);
+api.delete("/payroll/runs/:id",                      runCtrl.deleteRun);
+
+// Payslips nested under runs
+api.get("/payroll/runs/:runId/payslips", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    const payslips = await prisma.payslip.findMany({
+      where: { payrollRunId: runId },
+      include: { employee: { select: { firstName: true, lastName: true, matricule: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(payslips);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
+  try {
+    const payslip = await prisma.payslip.findUnique({
+      where: { id: req.params.payslipId },
+      include: {
+        employee: { select: { firstName: true, lastName: true, matricule: true, position: true } },
+        payrollItems: { orderBy: { sortOrder: "asc" } },
+        contributions: true,
+      },
+    });
+    if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
+    res.json(payslip);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.get("/payroll/runs/:runId/payslips/:payslipId/pdf", async (req, res) => {
+  // Redirect to payslips route
+  res.redirect(`/payslips/${req.params.payslipId}/pdf`);
+});
+
+// Calculate run
+api.post("/payroll/runs/:runId/calculate", async (req, res) => {
+  try {
+    const { calculatePayrollRun } = await import("./services/payrollCalculationService.js");
+    const result = await calculatePayrollRun(req.params.runId);
+    res.json({
+  success: true,
+  message: `Calcul terminé : ${result.processed} traité(s)`,
+  ...result
+});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Validate / Lock run
+api.post("/payroll/runs/:runId/validate", async (req, res) => {
+  try {
+    const run = await prisma.payrollRun.update({
+      where: { id: req.params.runId },
+      data: { status: "COMPLETED" },
+    });
+    res.json(run);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.post("/payroll/runs/:runId/lock", async (req, res) => {
+  try {
+    const run = await prisma.payrollRun.update({
+      where: { id: req.params.runId },
+      data: { status: "LOCKED" },
+    });
+    res.json(run);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Payroll Items
 api.post  ("/payroll-items",                      itemCtrl.createItem);
