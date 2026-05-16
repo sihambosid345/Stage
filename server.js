@@ -516,39 +516,57 @@ api.delete("/payroll-config/:id", requireAdmin, async (req, res) => {
 // ─── StatutoryRates (Taux légaux CNSS/AMO/etc.) ───────────────────────────────
 import * as statutoryRateSvc from "./services/StatutoryrateService .js";
 
-api.get("/statutory-rates", async (req, res) => {
+api.get("/payroll/statutory-rates", async (req, res) => {
   try {
     const { companyId } = req.query;
     const rates = await statutoryRateSvc.getAllRates(companyId || null);
-    res.json(rates);
+    // Map DB fields -> frontend interface (ceilingAmount->ceiling, add version)
+    const mapped = rates.map(r => ({
+      id: r.id,
+      code: r.code,
+      label: r.label,
+      rate: Number(r.rate),
+      ceiling: r.ceilingAmount != null ? Number(r.ceilingAmount) : undefined,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo ?? undefined,
+      version: 1,
+      isActive: r.isActive,
+      companyId: r.companyId,
+    }));
+    res.json(mapped);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-api.post("/statutory-rates", requireAdmin, async (req, res) => {
+api.post("/payroll/statutory-rates", requireAdmin, async (req, res) => {
   try {
-    const data = { ...req.body };
-    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
-    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
-    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
-    if (data.ceilingAmount !== undefined && data.ceilingAmount !== null) data.ceilingAmount = parseFloat(data.ceilingAmount);
-    const rate = await statutoryRateSvc.createRate(data);
-    res.status(201).json(rate);
+    const body = { ...req.body };
+    // Map frontend field names -> DB field names
+    if (body.ceiling !== undefined) { body.ceilingAmount = body.ceiling; delete body.ceiling; }
+    if (body.effectiveFrom) body.effectiveFrom = new Date(body.effectiveFrom);
+    if (body.effectiveTo)   body.effectiveTo   = new Date(body.effectiveTo);
+    if (body.rate !== undefined) body.rate = parseFloat(body.rate);
+    if (body.ceilingAmount !== undefined && body.ceilingAmount !== null) body.ceilingAmount = parseFloat(body.ceilingAmount);
+    delete body.version; // version not stored in DB
+    const rate = await statutoryRateSvc.createRate(body);
+    res.status(201).json({ ...rate, ceiling: rate.ceilingAmount, version: 1 });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-api.put("/statutory-rates/:id", requireAdmin, async (req, res) => {
+api.put("/payroll/statutory-rates/:id", requireAdmin, async (req, res) => {
   try {
-    const data = { ...req.body };
-    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
-    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
-    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
-    if (data.ceilingAmount !== undefined && data.ceilingAmount !== null) data.ceilingAmount = parseFloat(data.ceilingAmount);
-    const rate = await statutoryRateSvc.updateRate(req.params.id, data);
-    res.json(rate);
+    const body = { ...req.body };
+    if (body.ceiling !== undefined) { body.ceilingAmount = body.ceiling; delete body.ceiling; }
+    if (body.effectiveFrom) body.effectiveFrom = new Date(body.effectiveFrom);
+    if (body.effectiveTo)   body.effectiveTo   = new Date(body.effectiveTo);
+    if (body.rate !== undefined) body.rate = parseFloat(body.rate);
+    if (body.ceilingAmount !== undefined && body.ceilingAmount !== null) body.ceilingAmount = parseFloat(body.ceilingAmount);
+    delete body.version;
+    const rate = await statutoryRateSvc.updateRate(req.params.id, body);
+    res.json({ ...rate, ceiling: rate.ceilingAmount, version: 1 });
   } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
-api.delete("/statutory-rates/:id", requireAdmin, async (req, res) => {
+api.delete("/payroll/statutory-rates/:id", requireAdmin, async (req, res) => {
   try {
     await statutoryRateSvc.deactivateRate(req.params.id);
     res.json({ message: "Taux désactivé avec succès" });
@@ -556,7 +574,7 @@ api.delete("/statutory-rates/:id", requireAdmin, async (req, res) => {
 });
 
 // Seed des taux légaux marocains par défaut
-api.post("/statutory-rates/seed", requireAdmin, async (req, res) => {
+api.post("/payroll/statutory-rates/seed", requireAdmin, async (req, res) => {
   try {
     const NATIONAL_TODAY = new Date("2026-01-01");
     const STATUTORY_RATES = [
@@ -580,46 +598,85 @@ api.post("/statutory-rates/seed", requireAdmin, async (req, res) => {
 });
 
 // ─── TaxBrackets (Barème IR) ──────────────────────────────────────────────────
-api.get("/tax-brackets", async (req, res) => {
+api.get("/payroll/tax-brackets", async (req, res) => {
   try {
-    const { companyId, taxCode = "IR_SALAIRE" } = req.query;
+    const { companyId, code: taxCode = "IR_SALAIRE" } = req.query;
     const rows = await prisma.taxBracket.findMany({
       where: { taxCode, OR: [{ companyId: companyId || null }, { companyId: null }], isActive: true },
       orderBy: [{ annualFrom: "asc" }],
     });
-    res.json(rows);
+    // Map DB fields -> frontend interface
+    const mapped = rows.map(b => ({
+      id: b.id,
+      code: b.taxCode,
+      minAmount: Number(b.annualFrom),
+      maxAmount: b.annualTo != null ? Number(b.annualTo) : undefined,
+      rate: Number(b.rate),
+      deduction: Number(b.deductionAmount),
+      effectiveFrom: b.effectiveFrom,
+      effectiveTo: b.effectiveTo ?? undefined,
+      version: b.version ?? 1,
+      isActive: b.isActive,
+      companyId: b.companyId,
+    }));
+    res.json(mapped);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-api.post("/tax-brackets", requireAdmin, async (req, res) => {
+api.post("/payroll/tax-brackets", requireAdmin, async (req, res) => {
   try {
-    const data = { ...req.body };
-    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
-    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
-    if (data.annualFrom !== undefined) data.annualFrom = parseFloat(data.annualFrom);
-    if (data.annualTo   !== undefined && data.annualTo !== null) data.annualTo = parseFloat(data.annualTo);
-    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
-    if (data.deductionAmount !== undefined) data.deductionAmount = parseFloat(data.deductionAmount);
-    const bracket = await statutoryRateSvc.createTaxBracket(data);
-    res.status(201).json(bracket);
+    const body = { ...req.body };
+    // Map frontend field names -> DB field names
+    if (body.code)      { body.taxCode = body.code;           delete body.code; }
+    if (body.minAmount !== undefined) { body.annualFrom = body.minAmount; delete body.minAmount; }
+    if (body.maxAmount !== undefined || body.maxAmount === null) { body.annualTo = body.maxAmount ?? null; delete body.maxAmount; }
+    if (body.deduction !== undefined) { body.deductionAmount = body.deduction; delete body.deduction; }
+    delete body.version;
+    if (body.effectiveFrom) body.effectiveFrom = new Date(body.effectiveFrom);
+    if (body.effectiveTo)   body.effectiveTo   = new Date(body.effectiveTo);
+    if (body.annualFrom !== undefined) body.annualFrom = parseFloat(body.annualFrom);
+    if (body.annualTo   !== undefined && body.annualTo !== null) body.annualTo = parseFloat(body.annualTo);
+    if (body.rate !== undefined) body.rate = parseFloat(body.rate);
+    if (body.deductionAmount !== undefined) body.deductionAmount = parseFloat(body.deductionAmount);
+    const bracket = await statutoryRateSvc.createTaxBracket(body);
+    res.status(201).json({
+      ...bracket,
+      code: bracket.taxCode,
+      minAmount: Number(bracket.annualFrom),
+      maxAmount: bracket.annualTo != null ? Number(bracket.annualTo) : undefined,
+      deduction: Number(bracket.deductionAmount),
+      version: 1,
+    });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-api.put("/tax-brackets/:id", requireAdmin, async (req, res) => {
+api.put("/payroll/tax-brackets/:id", requireAdmin, async (req, res) => {
   try {
-    const data = { ...req.body };
-    if (data.effectiveFrom) data.effectiveFrom = new Date(data.effectiveFrom);
-    if (data.effectiveTo)   data.effectiveTo   = new Date(data.effectiveTo);
-    if (data.annualFrom !== undefined) data.annualFrom = parseFloat(data.annualFrom);
-    if (data.annualTo   !== undefined && data.annualTo !== null) data.annualTo = parseFloat(data.annualTo);
-    if (data.rate !== undefined) data.rate = parseFloat(data.rate);
-    if (data.deductionAmount !== undefined) data.deductionAmount = parseFloat(data.deductionAmount);
-    const bracket = await statutoryRateSvc.updateTaxBracket(req.params.id, data);
-    res.json(bracket);
+    const body = { ...req.body };
+    if (body.code)      { body.taxCode = body.code;           delete body.code; }
+    if (body.minAmount !== undefined) { body.annualFrom = body.minAmount; delete body.minAmount; }
+    if (body.maxAmount !== undefined || body.maxAmount === null) { body.annualTo = body.maxAmount ?? null; delete body.maxAmount; }
+    if (body.deduction !== undefined) { body.deductionAmount = body.deduction; delete body.deduction; }
+    delete body.version;
+    if (body.effectiveFrom) body.effectiveFrom = new Date(body.effectiveFrom);
+    if (body.effectiveTo)   body.effectiveTo   = new Date(body.effectiveTo);
+    if (body.annualFrom !== undefined) body.annualFrom = parseFloat(body.annualFrom);
+    if (body.annualTo   !== undefined && body.annualTo !== null) body.annualTo = parseFloat(body.annualTo);
+    if (body.rate !== undefined) body.rate = parseFloat(body.rate);
+    if (body.deductionAmount !== undefined) body.deductionAmount = parseFloat(body.deductionAmount);
+    const bracket = await statutoryRateSvc.updateTaxBracket(req.params.id, body);
+    res.json({
+      ...bracket,
+      code: bracket.taxCode,
+      minAmount: Number(bracket.annualFrom),
+      maxAmount: bracket.annualTo != null ? Number(bracket.annualTo) : undefined,
+      deduction: Number(bracket.deductionAmount),
+      version: 1,
+    });
   } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
-api.delete("/tax-brackets/:id", requireAdmin, async (req, res) => {
+api.delete("/payroll/tax-brackets/:id", requireAdmin, async (req, res) => {
   try {
     await statutoryRateSvc.deactivateTaxBracket(req.params.id);
     res.json({ message: "Tranche IR désactivée avec succès" });
@@ -627,7 +684,7 @@ api.delete("/tax-brackets/:id", requireAdmin, async (req, res) => {
 });
 
 // Seed du barème IR marocain 2026 par défaut
-api.post("/tax-brackets/seed", requireAdmin, async (req, res) => {
+api.post("/payroll/tax-brackets/seed", requireAdmin, async (req, res) => {
   try {
     const NATIONAL_TODAY = new Date("2026-01-01");
     const TAX_BRACKETS = [
