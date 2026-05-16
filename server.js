@@ -582,8 +582,11 @@ import * as statutoryRateSvc from "./services/StatutoryrateService .js";
 
 api.get("/payroll/statutory-rates", async (req, res) => {
   try {
-    const { companyId } = req.query;
-    const rates = await statutoryRateSvc.getAllRates(companyId || null);
+    const isSuperAdmin = req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN';
+    const companyId = isSuperAdmin
+      ? (req.query.companyId || null)
+      : (req.user?.companyId || null);
+    const rates = await statutoryRateSvc.getAllRates(companyId);
     // Map DB fields -> frontend interface (ceilingAmount->ceiling, add version)
     const mapped = rates.map(r => ({
       id: r.id,
@@ -603,7 +606,12 @@ api.get("/payroll/statutory-rates", async (req, res) => {
 
 api.post("/payroll/statutory-rates", requireAdmin, async (req, res) => {
   try {
+    const isSuperAdmin = req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN';
     const body = { ...req.body };
+    // For non-super-admin, force their company
+    if (!isSuperAdmin) {
+      body.companyId = req.user?.companyId || null;
+    }
     // Map frontend field names -> DB field names
     if (body.ceiling !== undefined) { body.ceilingAmount = body.ceiling; delete body.ceiling; }
     if (body.effectiveFrom) body.effectiveFrom = new Date(body.effectiveFrom);
@@ -664,7 +672,11 @@ api.post("/payroll/statutory-rates/seed", requireAdmin, async (req, res) => {
 // ─── TaxBrackets (Barème IR) ──────────────────────────────────────────────────
 api.get("/payroll/tax-brackets", async (req, res) => {
   try {
-    const { companyId, code: taxCode = "IR_SALAIRE" } = req.query;
+    const isSuperAdmin = req.user?.isSuperAdmin || req.user?.role === 'SUPER_ADMIN';
+    const { code: taxCode = "IR_SALAIRE" } = req.query;
+    const companyId = isSuperAdmin
+      ? (req.query.companyId || null)
+      : (req.user?.companyId || null);
     const rows = await prisma.taxBracket.findMany({
       where: { taxCode, OR: [{ companyId: companyId || null }, { companyId: null }], isActive: true },
       orderBy: [{ annualFrom: "asc" }],
