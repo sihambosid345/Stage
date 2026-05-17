@@ -1,4 +1,5 @@
 import { prisma } from "../prismaClient.js";
+
 const includeRelations = {
   company: { select: { id: true, name: true } },
   payrollPeriod: { select: { id: true, year: true, month: true } },
@@ -10,8 +11,15 @@ export const createRun = async (data) => {
   return await prisma.payrollRun.create({ data, include: includeRelations });
 };
 
-export const getRuns = async () => {
+/**
+ * Récupère les runs.
+ * - SUPER_ADMIN sans companyId → tous les runs (toutes entreprises)
+ * - SUPER_ADMIN avec companyId → runs de cette entreprise uniquement
+ * - Admin/User → companyId obligatoire → runs de leur entreprise
+ */
+export const getRuns = async (companyId = null) => {
   return await prisma.payrollRun.findMany({
+    where: companyId ? { companyId } : undefined,
     include: includeRelations,
     orderBy: { createdAt: "desc" },
   });

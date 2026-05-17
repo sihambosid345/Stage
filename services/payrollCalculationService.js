@@ -59,13 +59,12 @@ function round2(value) {
 async function loadStatutoryRates(companyId, effectiveDate) {
   const rows = await prisma.statutoryRate.findMany({
     where: {
-      OR: [{ companyId }, { companyId: null }],
-      effectiveFrom: { lte: effectiveDate },
-      OR: [
-        { effectiveTo: { gte: effectiveDate } },
-        { effectiveTo: null },
+      AND: [
+        { OR: [{ companyId }, { companyId: null }] },
+        { effectiveFrom: { lte: effectiveDate } },
+        { OR: [{ effectiveTo: { gte: effectiveDate } }, { effectiveTo: null }] },
+        { isActive: true },
       ],
-      isActive: true,
     },
     orderBy: [
       { companyId: "desc" }, // taux entreprise en premier (non-null > null)
@@ -90,14 +89,13 @@ async function loadStatutoryRates(companyId, effectiveDate) {
 async function loadTaxBrackets(companyId, effectiveDate, taxCode = "IR_SALAIRE") {
   const rows = await prisma.taxBracket.findMany({
     where: {
-      taxCode,
-      OR: [{ companyId }, { companyId: null }],
-      effectiveFrom: { lte: effectiveDate },
-      OR: [
-        { effectiveTo: { gte: effectiveDate } },
-        { effectiveTo: null },
+      AND: [
+        { taxCode },
+        { OR: [{ companyId }, { companyId: null }] },
+        { effectiveFrom: { lte: effectiveDate } },
+        { OR: [{ effectiveTo: { gte: effectiveDate } }, { effectiveTo: null }] },
+        { isActive: true },
       ],
-      isActive: true,
     },
     orderBy: [{ annualFrom: "asc" }],
   });
