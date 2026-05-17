@@ -1,17 +1,24 @@
 import { prisma } from "../prismaClient.js";
+
 const includeRelations = {
   employee: { select: { id: true, firstName: true, lastName: true } },
-  company: { select: { id: true, name: true } },
+  company:  { select: { id: true, name: true } },
   payrollPeriod: { select: { id: true, year: true, month: true } },
-  payrollRun: { select: { id: true, runNumber: true } },
+  payrollRun:    { select: { id: true, runNumber: true } },
 };
 
 export const createPayslip = async (data) => {
   return await prisma.payslip.create({ data, include: includeRelations });
 };
 
-export const getPayslips = async () => {
+/**
+ * SUPER_ADMIN sans companyId  → tous les bulletins
+ * SUPER_ADMIN avec companyId  → bulletins de cette entreprise
+ * Admin / User                → companyId obligatoire → leurs bulletins uniquement
+ */
+export const getPayslips = async (companyId = null) => {
   return await prisma.payslip.findMany({
+    where: companyId ? { companyId } : undefined,
     include: includeRelations,
     orderBy: { createdAt: "desc" },
   });

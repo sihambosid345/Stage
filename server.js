@@ -678,7 +678,7 @@ api.get("/payroll/tax-brackets", async (req, res) => {
       ? (req.query.companyId || null)
       : (req.user?.companyId || null);
     const rows = await prisma.taxBracket.findMany({
-      where: { taxCode, OR: [{ companyId: companyId || null }, { companyId: null }], isActive: true },
+      where: { AND: [{ taxCode }, { OR: [{ companyId: companyId || null }, { companyId: null }] }, { isActive: true }] },
       orderBy: [{ annualFrom: "asc" }],
     });
     // Map DB fields -> frontend interface

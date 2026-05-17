@@ -2,114 +2,100 @@ import { prisma } from "../prismaClient.js";
 
 const includeRelations = {
   employee: { select: { id: true, firstName: true, lastName: true } },
-  payrollRun: { 
-    select: { 
-      id: true, 
-      runNumber: true, 
+  payrollRun: {
+    select: {
+      id: true,
+      runNumber: true,
       status: true,
-      companyId: true  
-    } 
+      companyId: true,
+    },
   },
 };
 
 export const createItem = async (data) => {
   const { companyId, payrollRunId, employeeId, ...rest } = data;
-  
-  console.log('📥 Service createItem - Reçu:', { companyId, payrollRunId, employeeId });
-  
-  // ✅⭐⭐⭐ CORRECTION CRITIQUE ⭐⭐⭐
+
+  console.log("📥 Service createItem - Reçu:", { companyId, payrollRunId, employeeId });
+
   let finalCompanyId = companyId;
-  
+
   if (!finalCompanyId) {
-    console.log('⚠️ companyId est null, récupération automatique...');
-    
-    // Méthode 1: Récupérer depuis le PayrollRun
+    console.log("⚠️ companyId est null, récupération automatique...");
+
+    // Méthode 1 : depuis le PayrollRun
     if (payrollRunId) {
       const run = await prisma.payrollRun.findUnique({
         where: { id: payrollRunId },
-        select: { companyId: true }
+        select: { companyId: true },
       });
-      
-      console.log('📦 Run trouvé:', run);
-      
       if (run?.companyId) {
         finalCompanyId = run.companyId;
-        console.log('✅ CompanyId récupéré du run:', finalCompanyId);
+        console.log("✅ CompanyId récupéré du run:", finalCompanyId);
       }
     }
-    
-    // Méthode 2: Récupérer depuis l'Employee
+
+    // Méthode 2 : depuis l'Employee
     if (!finalCompanyId && employeeId) {
       const employee = await prisma.employee.findUnique({
         where: { id: employeeId },
-        select: { companyId: true }
+        select: { companyId: true },
       });
-      
-      console.log('📦 Employee trouvé:', employee);
-      
       if (employee?.companyId) {
         finalCompanyId = employee.companyId;
-        console.log('✅ CompanyId récupéré de l\'employé:', finalCompanyId);
+        console.log("✅ CompanyId récupéré de l'employé:", finalCompanyId);
       }
     }
-    
-    // Méthode 3: Récupérer depuis la période du run
+
+    // Méthode 3 : depuis la période du run
     if (!finalCompanyId && payrollRunId) {
       const runWithPeriod = await prisma.payrollRun.findUnique({
         where: { id: payrollRunId },
-        select: { 
-          payrollPeriod: {
-            select: { companyId: true }
-          }
-        }
+        select: { payrollPeriod: { select: { companyId: true } } },
       });
-      
-      console.log('📦 Période trouvée:', runWithPeriod?.payrollPeriod);
-      
       if (runWithPeriod?.payrollPeriod?.companyId) {
         finalCompanyId = runWithPeriod.payrollPeriod.companyId;
-        console.log('✅ CompanyId récupéré de la période:', finalCompanyId);
+        console.log("✅ CompanyId récupéré de la période:", finalCompanyId);
       }
     }
   }
-  
-  // ✅ Vérification finale
+
   if (!finalCompanyId) {
-    console.error('❌ Impossible de déterminer le companyId');
-    throw { 
-      status: 400, 
-      message: 'Impossible de déterminer l\'entreprise. Vérifiez le PayrollRun, l\'Employee et la PayrollPeriod.' 
+    throw {
+      status: 400,
+      message: "Impossible de déterminer l'entreprise. Vérifiez le PayrollRun, l'Employee et la PayrollPeriod.",
     };
   }
-  
-    console.log('✅ CompanyId final:', finalCompanyId);
-    
-    // ✅ Créer avec le bon companyId
-    // default amoApplicable from payload if provided, else false
-    const createData = {
-      ...rest,
-      companyId: finalCompanyId,  // GARANTI non-null
-      payrollRunId,
-      employeeId,
-    };
-    if (rest.amoApplicable === undefined) {
-      createData.amoApplicable = rest.amoApplicable || false;
-    }
-    return await prisma.payrollItem.create({
-      data: createData,
-      include: includeRelations,
-    });
+
+  console.log("✅ CompanyId final:", finalCompanyId);
+
+  const createData = {
+    ...rest,
+    companyId: finalCompanyId,
+    payrollRunId,
+    employeeId,
+  };
+  if (rest.amoApplicable === undefined) {
+    createData.amoApplicable = false;
+  }
+
+  return await prisma.payrollItem.create({ data: createData, include: includeRelations });
 };
 
-export const getItems = async () => {
-  const items = await prisma.payrollItem.findMany({ 
+/**
+ * SUPER_ADMIN sans companyId  → tous les items
+ * SUPER_ADMIN avec companyId  → items de cette entreprise
+ * Admin / User                → companyId obligatoire → leurs items uniquement
+ */
+export const getItems = async (companyId = null) => {
+  const items = await prisma.payrollItem.findMany({
+    where: companyId ? { companyId } : undefined,
     include: includeRelations,
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
   });
-  
-  return items.map(item => ({
+
+  return items.map((item) => ({
     ...item,
-    companyId: item.companyId || item.payrollRun?.companyId || null
+    companyId: item.companyId || item.payrollRun?.companyId || null,
   }));
 };
 
@@ -118,12 +104,12 @@ export const getItemById = async (id) => {
     where: { id },
     include: includeRelations,
   });
-  
+
   if (!item) throw { status: 404, message: "Payroll item not found" };
-  
+
   return {
     ...item,
-    companyId: item.companyId || item.payrollRun?.companyId || null
+    companyId: item.companyId || item.payrollRun?.companyId || null,
   };
 };
 
@@ -133,10 +119,10 @@ export const getItemsByRun = async (payrollRunId) => {
     include: includeRelations,
     orderBy: { sortOrder: "asc" },
   });
-  
-  return items.map(item => ({
+
+  return items.map((item) => ({
     ...item,
-    companyId: item.companyId || item.payrollRun?.companyId || null
+    companyId: item.companyId || item.payrollRun?.companyId || null,
   }));
 };
 
@@ -145,20 +131,16 @@ export const getItemsByEmployee = async (employeeId) => {
     where: { employeeId },
     include: includeRelations,
   });
-  
-  return items.map(item => ({
+
+  return items.map((item) => ({
     ...item,
-    companyId: item.companyId || item.payrollRun?.companyId || null
+    companyId: item.companyId || item.payrollRun?.companyId || null,
   }));
 };
 
 export const updateItem = async (id, data) => {
   await getItemById(id);
-  return await prisma.payrollItem.update({ 
-    where: { id }, 
-    data, 
-    include: includeRelations 
-  });
+  return await prisma.payrollItem.update({ where: { id }, data, include: includeRelations });
 };
 
 export const deleteItem = async (id) => {
