@@ -257,7 +257,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
   const variableItems = await tx.variableItem.findMany({
     where: {
       employeeId,
-      status: { in: ["APPROVED"] }, // Correction 10 : APPLIED seulement après LOCKED
+      status: { in: ["APPROVED", "PENDING"] }, // PENDING aussi inclus (auto-approuvé au calcul)
       effectiveDate: { gte: period.startDate, lte: period.endDate },
     },
   });
