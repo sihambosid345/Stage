@@ -1,4 +1,5 @@
 import * as payslipService from "../services/payslipService.js";
+import * as payslipPdfService from "../services/payslipPdfService.js";
 
 export const createPayslip = async (req, res) => {
   try {
@@ -43,6 +44,64 @@ export const getPayslip = async (req, res) => {
 export const getPayslipsByEmployee = async (req, res) => {
   try {
     res.json(await payslipService.getPayslipsByEmployee(req.params.employeeId));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+};
+
+// ─── Génération PDF ──────────────────────────────────────────────────────────
+export const generatePayslipPdf = async (req, res) => {
+  try {
+    const payslip = await payslipService.getPayslipById(req.params.id);
+
+    // Sécurité : vérifier l'accès
+    const isSuperAdmin = req.user?.isSuperAdmin || req.user?.role === "SUPER_ADMIN";
+    if (!isSuperAdmin && payslip.companyId !== req.user?.companyId) {
+      return res.status(403).json({ error: "Accès refusé." });
+    }
+
+    const result = await payslipPdfService.generatePayslipPdf(req.params.id);
+    res.json({
+      success: true,
+      message: "Bulletin PDF généré avec succès",
+      data: result,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+};
+
+// ─── Générer les PDFs en masse ────────────────────────────────────────────────
+export const generatePayslipsPdf = async (req, res) => {
+  try {
+    const { payslipIds, payrollPeriodId } = req.body;
+
+    if (!payslipIds && !payrollPeriodId) {
+      return res.status(400).json({ error: "payslipIds ou payrollPeriodId est requis" });
+    }
+
+    let result;
+    if (payrollPeriodId) {
+      result = await payslipPdfService.regeneratePayslipPdfsByPeriod(payrollPeriodId);
+    } else {
+      result = await payslipPdfService.generatePayslipsBatch(payslipIds);
+    }
+
+    res.json({
+      success: true,
+      message: `${result.results.length} bulletin(s) généré(s)`,
+      data: result,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+};
+
+// ─── Télécharger un PDF ──────────────────────────────────────────────────────
+export const downloadPayslipPdf = async (req, res) => {
+  try {
+    const filepath = await payslipPdfService.getPayslipPdf(req.params.filename);
+    res.download(filepath);
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }

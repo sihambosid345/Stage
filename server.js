@@ -165,6 +165,8 @@ api.delete("/payroll-periods/:id",              periodCtrl.deletePeriod);
 api.get   ("/payroll/runs",                          runCtrl.getRuns);
 api.post  ("/payroll/runs",                          runCtrl.createRun);
 api.get   ("/payroll/runs/:id",                      runCtrl.getRun);
+api.put   ("/payroll/runs/:id",                      runCtrl.updateRun);
+api.patch ("/payroll/runs/:id",                      runCtrl.updateRun);
 api.delete("/payroll/runs/:id",                      runCtrl.deleteRun);
 
 // Payslips nested under runs
@@ -185,19 +187,104 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
     const payslip = await prisma.payslip.findUnique({
       where: { id: req.params.payslipId },
       include: {
-        employee: { select: { firstName: true, lastName: true, matricule: true, position: true } },
+        employee: {
+          select: {
+            firstName: true, lastName: true,
+            matricule: true, employeeCode: true,
+            cin: true, position: true,
+            department: { select: { name: true } },
+            contracts: {
+              where: { status: "ACTIVE" },
+              orderBy: { startDate: "desc" },
+              take: 1,
+              select: { contractType: true, salaryCalculationType: true },
+            },
+          }
+        },
+        payrollPeriod: { select: { year: true, month: true } },
         payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
     });
     if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
-    res.json(payslip);
+
+    // Normalize for frontend: add aliases expected by Angular component
+    const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
+      "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    const per = payslip.payrollPeriod;
+    const emp = payslip.employee;
+
+    const normalized = {
+      ...payslip,
+      // Frontend reads "items" not "payrollItems"
+      items: payslip.payrollItems || [],
+      // Frontend reads "employeeName"
+      employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
+      matricule: emp?.matricule || emp?.employeeCode || "—",
+      // Period as string
+      period: per ? `${MONTHS_FR[per.month] ?? per.month} ${per.year}` : "—",
+      salaryType: emp?.contracts?.[0]?.salaryCalculationType || "MONTHLY",
+      // Ensure numeric fields
+      grossSalary: Number(payslip.grossSalary ?? 0),
+      netSalary: Number(payslip.netSalary ?? 0),
+      taxableGross: Number(payslip.taxableGross ?? 0),
+      cnssBase: Number(payslip.cnssBase ?? 0),
+      amoBase: Number(payslip.amoBase ?? 0),
+      amoGross: Number(payslip.amoBase ?? 0),
+      totalEmpCharges: Number(payslip.employeeChargesTotal ?? 0),
+      cnssEmpAmount: Number(payslip.totalCnss ?? 0),
+      amoEmpAmount: 0,
+      cimrEmpAmount: 0,
+      incomeTaxBase: Number(payslip.incomeTaxBase ?? 0),
+      incomeTaxAmount: Number(payslip.incomeTaxAmount ?? 0),
+      employerChargesTotal: Number(payslip.employerChargesTotal ?? 0),
+      totalDeductions: Number(payslip.totalDeductions ?? 0) + Number(payslip.incomeTaxAmount ?? 0),
+    };
+
+    // Calculate AMO/CIMR from snapshot
+    const snap = payslip.snapshotData || {};
+    const rates = snap.appliedRates || {};
+    if (rates.amoEmployee) {
+      normalized.amoEmpAmount = Math.round(Number(normalized.amoGross) * rates.amoEmployee * 100) / 100;
+    }
+    if (rates.cimrEmployee) {
+      normalized.cimrEmpAmount = Math.round(Number(normalized.grossSalary) * rates.cimrEmployee * 100) / 100;
+    }
+    normalized.baseSalary = snap.baseSalary !== undefined ? Number(snap.baseSalary) : Number(normalized.grossSalary);
+
+    res.json(normalized);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 api.get("/payroll/runs/:runId/payslips/:payslipId/pdf", async (req, res) => {
-  // Redirect to payslips route
-  res.redirect(`/payslips/${req.params.payslipId}/pdf`);
+  try {
+    const { generatePayslipPdf } = await import("./services/payslipPdfService.js");
+    const pdfBuffer = await generatePayslipPdf(req.params.payslipId);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="bulletin-${req.params.payslipId}.pdf"`,
+      "Content-Length": pdfBuffer.length,
+    });
+    res.send(pdfBuffer);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Route standalone bulletin PDF (sans runId)
+api.get("/payslips/:payslipId/pdf", async (req, res) => {
+  try {
+    const { generatePayslipPdf } = await import("./services/payslipPdfService.js");
+    const pdfBuffer = await generatePayslipPdf(req.params.payslipId);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="bulletin-${req.params.payslipId}.pdf"`,
+      "Content-Length": pdfBuffer.length,
+    });
+    res.send(pdfBuffer);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 // Calculate run
@@ -205,11 +292,24 @@ api.post("/payroll/runs/:runId/calculate", async (req, res) => {
   try {
     const { calculatePayrollRun } = await import("./services/payrollCalculationService.js");
     const result = await calculatePayrollRun(req.params.runId);
+
+    // Normalize response to match frontend PayrollCalculationResult interface
+    const errorsList = (result.results || [])
+      .filter(r => r.error)
+      .map(r => ({ employeeId: r.employeeId, message: r.error }));
+
     res.json({
-  success: true,
-  message: `Calcul terminé : ${result.processed} traité(s)`,
-  ...result
-});
+      success: true,
+      message: `Calcul terminé : ${result.processed} traité(s), ${result.errors} erreur(s)`,
+      payrollRunId: result.runId,
+      processedCount: result.processed ?? 0,
+      errorCount: result.errors ?? 0,
+      totalGross: result.totalGross ?? 0,
+      totalNet: result.totalNet ?? 0,
+      totalEmployerContributions: result.totalErCharges ?? 0,
+      errors: errorsList,
+      ...result,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

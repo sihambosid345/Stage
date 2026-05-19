@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BULLETIN DE PAIE</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 11px;
+            color: #333;
+            line-height: 1.4;
+        }
+        
+        .container {
+            width: 210mm;
+            height: 297mm;
+            margin: 0 auto;
+            padding: 15mm;
+            background: white;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .company-info {
+            flex: 1;
+        }
+        
+        .company-logo {
+            width: 40px;
+            height: 40px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        
+        .company-name {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 3px;
+        }
+        
+        .title {
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 15px 0;
+            text-decoration: underline;
+        }
+        
+        .employee-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        
+        .info-block {
+            flex: 1;
+        }
+        
+        .info-block h4 {
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #ccc;
+        }
+        
+        .info-block p {
+            margin: 2px 0;
+            font-size: 10px;
+        }
+        
+        .info-block strong {
+            display: inline-block;
+            width: 120px;
+        }
+        
+        .payslip-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        
+        .payslip-table thead {
+            background: #f5f5f5;
+            border-bottom: 2px solid #000;
+        }
+        
+        .payslip-table th {
+            padding: 8px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 10px;
+            text-transform: uppercase;
+            border: 1px solid #ddd;
+        }
+        
+        .payslip-table td {
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            font-size: 10px;
+        }
+        
+        .payslip-table tr.section-header {
+            background: #e8e8e8;
+            font-weight: bold;
+        }
+        
+        .payslip-table tr.section-header td {
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px;
+        }
+        
+        .payslip-table tr.total {
+            background: #f0f0f0;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            font-weight: bold;
+        }
+        
+        .payslip-table tr.subtotal {
+            background: #f9f9f9;
+            font-weight: bold;
+        }
+        
+        .text-right {
+            text-align: right;
+        }
+        
+        .amount {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .negative {
+            color: #d32f2f;
+        }
+        
+        .summary {
+            display: flex;
+            justify-content: space-between;
+            margin: 15px 0;
+            border: 2px solid #000;
+            padding: 10px;
+        }
+        
+        .summary-item {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .summary-label {
+            font-size: 9px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .summary-value {
+            font-size: 14px;
+            font-weight: bold;
+            color: #1976d2;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            font-size: 9px;
+            text-align: center;
+        }
+        
+        .contributions {
+            margin-top: 15px;
+        }
+        
+        .contributions-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+        }
+        
+        .contributions-table thead {
+            background: #f5f5f5;
+        }
+        
+        .contributions-table th,
+        .contributions-table td {
+            padding: 5px;
+            border: 1px solid #ddd;
+            text-align: right;
+        }
+        
+        .contributions-table th {
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        .contributions-table .label {
+            text-align: left;
+        }
+        
+        .page-break {
+            page-break-after: always;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- En-tête -->
+        <div class="header">
+            <div class="company-info">
+                <div class="company-name">{{company.name}}</div>
+                <div style="font-size: 9px;">{{company.address}}</div>
+                <div style="font-size: 9px;">{{company.city}}</div>
+            </div>
+            <div style="text-align: right; font-size: 9px;">
+                <div><strong>Bulletin de Paie N°:</strong> {{payslip.payslipNumber}}</div>
+                <div><strong>Période:</strong> {{formatDate payroll.startDate}} - {{formatDate payroll.endDate}}</div>
+                <div><strong>Date de génération:</strong> {{today}}</div>
+            </div>
+        </div>
+        
+        <div class="title">BULLETIN DE PAIE</div>
+        
+        <!-- Informations employé -->
+        <div class="employee-info">
+            <div class="info-block">
+                <h4>Informations Employé</h4>
+                <p><strong>Nom & Prénom:</strong> {{employee.firstName}} {{employee.lastName}}</p>
+                <p><strong>Matricule:</strong> {{employee.employeeCode}}</p>
+                <p><strong>N° Sécurité Sociale:</strong> {{employee.socialSecurityNumber}}</p>
+                <p><strong>Fonction:</strong> {{employee.position}}</p>
+            </div>
+            <div class="info-block">
+                <h4>Contrat</h4>
+                <p><strong>Type de Contrat:</strong> {{contract.type}}</p>
+                <p><strong>Date de Début:</strong> {{formatDate contract.startDate}}</p>
+                <p><strong>Situation Familiale:</strong> {{employee.familialStatus}}</p>
+                <p><strong>Nombre d'Enfants:</strong> {{employee.numberChildren}}</p>
+            </div>
+        </div>
+        
+        <!-- Tableau des éléments de paie -->
+        <table class="payslip-table">
+            <thead>
+                <tr>
+                    <th style="width: 50%">Désignation</th>
+                    <th style="width: 15%; text-align: center">Nombre</th>
+                    <th style="width: 15%; text-align: right">Taux</th>
+                    <th style="width: 20%; text-align: right">Montants</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each items}}
+                    {{#ifEquals this.category "GAINS"}}
+                        <tr>
+                            <td>{{this.label}}</td>
+                            <td class="text-right">{{this.quantity}}</td>
+                            <td class="amount">{{formatMoney this.rate}}</td>
+                            <td class="amount">{{formatMoney this.amount}}</td>
+                        </tr>
+                    {{/ifEquals}}
+                {{/each}}
+                
+                <tr class="subtotal">
+                    <td colspan="3">SALAIRE BRUT</td>
+                    <td class="amount">{{formatMoney payslip.grossSalary}}</td>
+                </tr>
+                
+                <tr class="section-header">
+                    <td colspan="4">COTISATIONS SALARIALES</td>
+                </tr>
+                
+                {{#each contributions}}
+                    <tr>
+                        <td>{{this.label}}</td>
+                        <td class="text-right">{{formatMoney this.baseAmount}}</td>
+                        <td class="amount">{{multiply this.rate 100}}%</td>
+                        <td class="amount negative">- {{formatMoney this.employeeAmount}}</td>
+                    </tr>
+                {{/each}}
+                
+                <tr class="subtotal">
+                    <td colspan="3">TOTAL COTISATIONS</td>
+                    <td class="amount negative">- {{formatMoney payslip.employeeChargesTotal}}</td>
+                </tr>
+                
+                <tr class="section-header">
+                    <td colspan="4">IMPÔTS</td>
+                </tr>
+                
+                <tr>
+                    <td>Impôt sur le Revenu (IR)</td>
+                    <td colspan="2" class="text-right">Base: {{formatMoney payslip.incomeTaxBase}}</td>
+                    <td class="amount negative">- {{formatMoney payslip.incomeTaxAmount}}</td>
+                </tr>
+                
+                {{#if payslip.totalAdvances}}
+                <tr class="section-header">
+                    <td colspan="4">AVANCES ET RETENUES</td>
+                </tr>
+                
+                {{#each deductions}}
+                    <tr>
+                        <td>{{this.label}}</td>
+                        <td colspan="2"></td>
+                        <td class="amount negative">- {{formatMoney this.amount}}</td>
+                    </tr>
+                {{/each}}
+                {{/if}}
+                
+                <tr class="total">
+                    <td colspan="3">SALAIRE NET IMPOSABLE</td>
+                    <td class="amount">{{formatMoney payslip.netSalary}}</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <!-- Résumé -->
+        <div class="summary">
+            <div class="summary-item">
+                <div class="summary-label">Salaire Brut</div>
+                <div class="summary-value">{{formatMoney payslip.grossSalary}}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total Cotisations & Impôts</div>
+                <div class="summary-value negative">- {{formatMoney payslip.totalDeductions}}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Salaire Net</div>
+                <div class="summary-value">{{formatMoney payslip.netSalary}}</div>
+            </div>
+        </div>
+        
+        <!-- Tableau des cotisations détaillées -->
+        <div class="contributions">
+            <h4 style="font-size: 10px; font-weight: bold; margin-bottom: 8px;">DÉTAIL DES COTISATIONS PATRONALES</h4>
+            <table class="contributions-table">
+                <thead>
+                    <tr>
+                        <th class="label">Libellé</th>
+                        <th>Base</th>
+                        <th>Taux</th>
+                        <th>Salarié</th>
+                        <th>Employeur</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each contributions}}
+                    <tr>
+                        <td class="label">{{this.label}}</td>
+                        <td>{{formatMoney this.baseAmount}}</td>
+                        <td>{{multiply this.rate 100}}%</td>
+                        <td>{{formatMoney this.employeeAmount}}</td>
+                        <td>{{formatMoney this.employerAmount}}</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pied de page -->
+        <div class="footer">
+            <p>Ce bulletin de paie est établi conformément à la législation fiscale et sociale en vigueur.</p>
+            <p style="margin-top: 5px; font-size: 8px;">Généré le {{today}} - {{company.name}}</p>
+        </div>
+    </div>
+</body>
+</html>

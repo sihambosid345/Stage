@@ -1,5 +1,28 @@
 import { prisma } from "../prismaClient.js";
 
+/**
+ * Normalise les champs PayrollRun pour correspondre au frontend Angular.
+ * totalEmployees → employeeCount
+ * totalEmployerCharges → employerContributions
+ */
+function normalizeRun(run) {
+  if (!run) return run;
+  return {
+    ...run,
+    // Frontend reads these names
+    employeeCount: run.totalEmployees ?? 0,
+    employerContributions: Number(run.totalEmployerCharges ?? 0),
+    totalGross: Number(run.totalGross ?? 0),
+    totalNet: Number(run.totalNet ?? 0),
+    totalDeductions: Number(run.totalDeductions ?? 0),
+    // Period string helper (YYYY-MM)
+    period: run.payrollPeriod
+      ? `${run.payrollPeriod.year}-${String(run.payrollPeriod.month).padStart(2, '0')}`
+      : null,
+  };
+}
+
+
 const includeRelations = {
   company: { select: { id: true, name: true } },
   payrollPeriod: { select: { id: true, year: true, month: true } },
@@ -48,7 +71,7 @@ export const createRun = async (data) => {
     where: { payrollPeriodId: payrollPeriod.id }
   });
 
-  return await prisma.payrollRun.create({
+  const run = await prisma.payrollRun.create({
     data: {
       companyId,
       payrollPeriodId: payrollPeriod.id,
@@ -58,8 +81,9 @@ export const createRun = async (data) => {
     },
     include: includeRelations
   });
+  return normalizeRun(run);
 };
-createRun
+
 /**
  * Récupère les runs.
  * - SUPER_ADMIN sans companyId → tous les runs (toutes entreprises)
@@ -67,11 +91,12 @@ createRun
  * - Admin/User → companyId obligatoire → runs de leur entreprise
  */
 export const getRuns = async (companyId = null) => {
-  return await prisma.payrollRun.findMany({
+  const runs = await prisma.payrollRun.findMany({
     where: companyId ? { companyId } : undefined,
     include: includeRelations,
     orderBy: { createdAt: "desc" },
   });
+  return runs.map(normalizeRun);
 };
 
 export const getRunById = async (id) => {
@@ -80,19 +105,21 @@ export const getRunById = async (id) => {
     include: includeRelations,
   });
   if (!run) throw { status: 404, message: "Payroll run not found" };
-  return run;
+  return normalizeRun(run);
 };
 
 export const getRunsByPeriod = async (payrollPeriodId) => {
-  return await prisma.payrollRun.findMany({
+  const runs = await prisma.payrollRun.findMany({
     where: { payrollPeriodId },
     include: includeRelations,
   });
+  return runs.map(normalizeRun);
 };
 
 export const updateRun = async (id, data) => {
   await getRunById(id);
-  return await prisma.payrollRun.update({ where: { id }, data, include: includeRelations });
+  const run = await prisma.payrollRun.update({ where: { id }, data, include: includeRelations });
+  return normalizeRun(run);
 };
 
 export const deleteRun = async (id) => {
