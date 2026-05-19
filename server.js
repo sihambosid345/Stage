@@ -165,6 +165,8 @@ api.delete("/payroll-periods/:id",              periodCtrl.deletePeriod);
 api.get   ("/payroll/runs",                          runCtrl.getRuns);
 api.post  ("/payroll/runs",                          runCtrl.createRun);
 api.get   ("/payroll/runs/:id",                      runCtrl.getRun);
+api.put   ("/payroll/runs/:id",                      runCtrl.updateRun);
+api.patch ("/payroll/runs/:id",                      runCtrl.updateRun);
 api.delete("/payroll/runs/:id",                      runCtrl.deleteRun);
 
 // Payslips nested under runs
