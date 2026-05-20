@@ -20,5 +20,4 @@ export const getLogsByCompany = async (req, res) => {
 export const deleteLog = async (req, res) => {
   try { await auditLogService.deleteLog(req.params.id); res.json({ message: "Deleted" }); }
   catch (error) { res.status(error.status || 400).json({ error: error.message }); }
-  (update)
 };

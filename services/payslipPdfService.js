@@ -92,7 +92,11 @@ export const generatePayslipPdf = async (payslipId) => {
       },
       payrollRun: true,
       payrollPeriod: true,
-      company: true,
+      company: {
+        include: {
+          payrollConfig: true,
+        },
+      },
       contributions: true,
     },
   });
@@ -270,6 +274,18 @@ export const generatePayslipPdf = async (payslipId) => {
       phone: company?.phone || "—",
       email: company?.email || "—",
     },
+    configuration: company?.payrollConfig ? {
+      cnssEnabled: company.payrollConfig.cnssEnabled,
+      amoEnabled: company.payrollConfig.amoEnabled,
+      cimrEnabled: company.payrollConfig.cimrEnabled,
+      irEnabled: company.payrollConfig.irEnabled,
+      workingDaysPerMonth: company.payrollConfig.workingDaysPerMonth || null,
+      monthlyHours: company.payrollConfig.monthlyHours || null,
+      overtimeHoursForRate: company.payrollConfig.overtimeHoursForRate || null,
+      defaultCnssDeclaredDays: company.payrollConfig.defaultCnssDeclaredDays || null,
+      dateEffet: company.payrollConfig.dateEffet,
+      regime: company.payrollConfig.regime || "—",
+    } : null,
     payroll: {
       startDate: period?.startDate,
       endDate: period?.endDate,

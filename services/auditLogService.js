@@ -1,4 +1,4 @@
-import prisma from "../prismaClient.js";
+import { prisma } from "../prismaClient.js";
 
 const includeRelations = {
   company: { select: { id: true, name: true } },

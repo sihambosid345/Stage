@@ -381,6 +381,28 @@
         </div>
         {{/if}}
 
+        {{#if configuration}}
+        <div class="detail-section">
+            <div class="detail-card">
+                <h4>Configuration</h4>
+                <table class="detail-table">
+                    <tbody>
+                        <tr><td>CNSS activée</td><td>{{#if configuration.cnssEnabled}}Oui{{else}}Non{{/if}}</td></tr>
+                        <tr><td>AMO activée</td><td>{{#if configuration.amoEnabled}}Oui{{else}}Non{{/if}}</td></tr>
+                        <tr><td>CIMR activée</td><td>{{#if configuration.cimrEnabled}}Oui{{else}}Non{{/if}}</td></tr>
+                        <tr><td>IR activé</td><td>{{#if configuration.irEnabled}}Oui{{else}}Non{{/if}}</td></tr>
+                        {{#if configuration.workingDaysPerMonth}}<tr><td>Jours / mois</td><td>{{formatMoney configuration.workingDaysPerMonth}}</td></tr>{{/if}}
+                        {{#if configuration.monthlyHours}}<tr><td>Heures / mois</td><td>{{formatMoney configuration.monthlyHours}}</td></tr>{{/if}}
+                        {{#if configuration.overtimeHoursForRate}}<tr><td>Heures supp. pour taux</td><td>{{formatMoney configuration.overtimeHoursForRate}}</td></tr>{{/if}}
+                        {{#if configuration.defaultCnssDeclaredDays}}<tr><td>Jours CNSS déclarés</td><td>{{configuration.defaultCnssDeclaredDays}}</td></tr>{{/if}}
+                        {{#if configuration.regime}}<tr><td>Régime</td><td>{{configuration.regime}}</td></tr>{{/if}}
+                        {{#if configuration.dateEffet}}<tr><td>Date effet</td><td>{{formatDate configuration.dateEffet}}</td></tr>{{/if}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{/if}}
+
         {{#if statutoryRates.length}}
         <div class="detail-section">
             <div class="detail-card">

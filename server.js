@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 import authRoutes       from "./routes/authRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
 import payrollCalculationRoutes from './routes/payrollCalculationRoutes.js';
+import auditLogRoutes from "./routes/auditLogRoutes.js";
 
 import { authenticate, requireAdmin, requireSuperAdmin } from "./middlewares/authenticate.js";
 import { licenseMiddleware } from "./middlewares/licenseMiddleware.js";
@@ -151,6 +152,9 @@ api.get   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl
 api.put   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.updateLicense);
 api.delete("/licenses/:id",                       requireSuperAdmin, licenseCtrl.deleteLicense);
 
+// Audit logs
+api.use('/audit-logs', auditLogRoutes);
+
 
 // Payroll Periods
 api.post  ("/payroll-periods",                  periodCtrl.createPeriod);
@@ -228,11 +232,18 @@ api.get("/payroll/payslips/:payslipId", async (req, res) => {
           }
         },
         payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
-        payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
     });
     if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
+
+    const payrollItems = await prisma.payrollItem.findMany({
+      where: {
+        payrollRunId: payslip.payrollRunId,
+        employeeId: payslip.employeeId,
+      },
+      orderBy: { sortOrder: "asc" },
+    });
 
     const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
       "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -241,7 +252,7 @@ api.get("/payroll/payslips/:payslipId", async (req, res) => {
 
     const normalized = {
       ...payslip,
-      items: payslip.payrollItems || [],
+      items: payrollItems || [],
       employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
       matricule: emp?.matricule || emp?.employeeCode || "—",
       employeeCode: emp?.employeeCode || "—",
@@ -334,11 +345,18 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
           }
         },
         payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
-        payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
     });
     if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
+
+    const payrollItems = await prisma.payrollItem.findMany({
+      where: {
+        payrollRunId: payslip.payrollRunId,
+        employeeId: payslip.employeeId,
+      },
+      orderBy: { sortOrder: "asc" },
+    });
 
     // Normalize for frontend: add aliases expected by Angular component
     const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
@@ -349,7 +367,7 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
     const normalized = {
       ...payslip,
       // Frontend reads "items" not "payrollItems"
-      items: payslip.payrollItems || [],
+      items: payrollItems || [],
       // Frontend reads "employeeName"
       employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
       matricule: emp?.matricule || emp?.employeeCode || "—",
@@ -1027,7 +1045,7 @@ api.post("/payroll/tax-brackets/seed", requireAdmin, async (req, res) => {
 });
 
 // ─── Mount API ────────────────────────────────────────────────────────────────
-app.use(api);
+app.use('/api', api);
 
 // ─── 404 & Error handlers ─────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: "Route introuvable." }));
