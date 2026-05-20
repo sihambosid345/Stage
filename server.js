@@ -182,6 +182,134 @@ api.get("/payroll/runs/:runId/payslips", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+api.get("/payroll/payslips/run/:runId", async (req, res) => {
+  try {
+    const { runId } = req.params;
+    const payslips = await prisma.payslip.findMany({
+      where: { payrollRunId: runId },
+      include: { employee: { select: { firstName: true, lastName: true, matricule: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(payslips);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.get("/payroll/payslips", async (req, res) => {
+  try {
+    const payslips = await prisma.payslip.findMany({
+      include: { employee: { select: { firstName: true, lastName: true, matricule: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(payslips);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.get("/payroll/payslips/:payslipId", async (req, res) => {
+  try {
+    const payslip = await prisma.payslip.findUnique({
+      where: { id: req.params.payslipId },
+      include: {
+        employee: {
+          select: {
+            firstName: true, lastName: true,
+            matricule: true, employeeCode: true,
+            cin: true, email: true, phone: true,
+            address: true, city: true,
+            paymentMode: true, bankName: true, bankAccountNumber: true,
+            maritalStatus: true, childrenCount: true,
+            position: true,
+            department: { select: { name: true } },
+            contracts: {
+              where: { status: "ACTIVE" },
+              orderBy: { startDate: "desc" },
+              take: 1,
+              select: { contractType: true, salaryCalculationType: true, startDate: true, endDate: true },
+            },
+          }
+        },
+        payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
+        payrollItems: { orderBy: { sortOrder: "asc" } },
+        contributions: true,
+      },
+    });
+    if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
+
+    const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
+      "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    const per = payslip.payrollPeriod;
+    const emp = payslip.employee;
+
+    const normalized = {
+      ...payslip,
+      items: payslip.payrollItems || [],
+      employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
+      matricule: emp?.matricule || emp?.employeeCode || "—",
+      employeeCode: emp?.employeeCode || "—",
+      employeeCin: emp?.cin || "—",
+      employeeEmail: emp?.email || "—",
+      employeePhone: emp?.phone || "—",
+      employeeAddress: emp?.address || "—",
+      employeeCity: emp?.city || "—",
+      employeePaymentMode: emp?.paymentMode || "—",
+      employeeBankName: emp?.bankName || "—",
+      employeeBankAccountNumber: emp?.bankAccountNumber || "—",
+      employeeMaritalStatus: emp?.maritalStatus || "—",
+      employeeChildrenCount: emp?.childrenCount ?? 0,
+      employeePosition: emp?.position?.title || emp?.position?.name || "—",
+      employeeDepartment: emp?.department?.name || "—",
+      period: per ? `${MONTHS_FR[per.month] ?? per.month} ${per.year}` : "—",
+      payrollPeriodType: per?.type || "—",
+      payrollPeriodStatus: per?.status || "—",
+      salaryType: emp?.contracts?.[0]?.salaryCalculationType || "MONTHLY",
+      contractType: emp?.contracts?.[0]?.contractType || "—",
+      contractStartDate: emp?.contracts?.[0]?.startDate,
+      contractEndDate: emp?.contracts?.[0]?.endDate,
+      grossSalary: Number(payslip.grossSalary ?? 0),
+      netSalary: Number(payslip.netSalary ?? 0),
+      taxableGross: Number(payslip.taxableGross ?? 0),
+      cnssBase: Number(payslip.cnssBase ?? 0),
+      amoBase: Number(payslip.amoBase ?? 0),
+      amoGross: Number(payslip.amoBase ?? 0),
+      totalAllowances: Number(payslip.totalAllowances ?? 0),
+      totalBonuses: Number(payslip.totalBonuses ?? 0),
+      totalTax: Number(payslip.totalTax ?? 0),
+      totalCnss: Number(payslip.totalCnss ?? 0),
+      declaredDays: Number(payslip.declaredDays ?? 0),
+      totalEmpCharges: Number(payslip.employeeChargesTotal ?? 0),
+      cnssEmpAmount: Number(payslip.totalCnss ?? 0),
+      amoEmpAmount: 0,
+      cimrEmpAmount: 0,
+      incomeTaxBase: Number(payslip.incomeTaxBase ?? 0),
+      incomeTaxAmount: Number(payslip.incomeTaxAmount ?? 0),
+      employerChargesTotal: Number(payslip.employerChargesTotal ?? 0),
+      totalDeductions: Number(payslip.totalDeductions ?? 0),
+      currency: payslip.currency || "MAD",
+    };
+
+    const snap = payslip.snapshotData || {};
+    const rates = snap.appliedRates || {};
+    if (rates.amoEmployee) {
+      normalized.amoEmpAmount = Math.round(Number(normalized.amoGross) * rates.amoEmployee * 100) / 100;
+    }
+    if (rates.cimrEmployee) {
+      normalized.cimrEmpAmount = Math.round(Number(normalized.grossSalary) * rates.cimrEmployee * 100) / 100;
+    }
+    normalized.baseSalary = snap.baseSalary !== undefined ? Number(snap.baseSalary) : Number(normalized.grossSalary);
+
+    res.json(normalized);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+api.get("/payroll/payslips/:payslipId/pdf", async (req, res) => {
+  try {
+    const { generatePayslipPdf } = await import("./services/payslipPdfService.js");
+    const result = await generatePayslipPdf(req.params.payslipId);
+    return res.download(result.filepath, result.filename);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
   try {
     const payslip = await prisma.payslip.findUnique({
@@ -191,17 +319,21 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
           select: {
             firstName: true, lastName: true,
             matricule: true, employeeCode: true,
-            cin: true, position: true,
+            cin: true, email: true, phone: true,
+            address: true, city: true,
+            paymentMode: true, bankName: true, bankAccountNumber: true,
+            maritalStatus: true, childrenCount: true,
+            position: true,
             department: { select: { name: true } },
             contracts: {
               where: { status: "ACTIVE" },
               orderBy: { startDate: "desc" },
               take: 1,
-              select: { contractType: true, salaryCalculationType: true },
+              select: { contractType: true, salaryCalculationType: true, startDate: true, endDate: true },
             },
           }
         },
-        payrollPeriod: { select: { year: true, month: true } },
+        payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
         payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
@@ -221,9 +353,27 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
       // Frontend reads "employeeName"
       employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
       matricule: emp?.matricule || emp?.employeeCode || "—",
+      employeeCode: emp?.employeeCode || "—",
+      employeeCin: emp?.cin || "—",
+      employeeEmail: emp?.email || "—",
+      employeePhone: emp?.phone || "—",
+      employeeAddress: emp?.address || "—",
+      employeeCity: emp?.city || "—",
+      employeePaymentMode: emp?.paymentMode || "—",
+      employeeBankName: emp?.bankName || "—",
+      employeeBankAccountNumber: emp?.bankAccountNumber || "—",
+      employeeMaritalStatus: emp?.maritalStatus || "—",
+      employeeChildrenCount: emp?.childrenCount ?? 0,
+      employeePosition: emp?.position?.title || emp?.position?.name || "—",
+      employeeDepartment: emp?.department?.name || "—",
       // Period as string
       period: per ? `${MONTHS_FR[per.month] ?? per.month} ${per.year}` : "—",
+      payrollPeriodType: per?.type || "—",
+      payrollPeriodStatus: per?.status || "—",
       salaryType: emp?.contracts?.[0]?.salaryCalculationType || "MONTHLY",
+      contractType: emp?.contracts?.[0]?.contractType || "—",
+      contractStartDate: emp?.contracts?.[0]?.startDate,
+      contractEndDate: emp?.contracts?.[0]?.endDate,
       // Ensure numeric fields
       grossSalary: Number(payslip.grossSalary ?? 0),
       netSalary: Number(payslip.netSalary ?? 0),
@@ -231,6 +381,11 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
       cnssBase: Number(payslip.cnssBase ?? 0),
       amoBase: Number(payslip.amoBase ?? 0),
       amoGross: Number(payslip.amoBase ?? 0),
+      totalAllowances: Number(payslip.totalAllowances ?? 0),
+      totalBonuses: Number(payslip.totalBonuses ?? 0),
+      totalTax: Number(payslip.totalTax ?? 0),
+      totalCnss: Number(payslip.totalCnss ?? 0),
+      declaredDays: Number(payslip.declaredDays ?? 0),
       totalEmpCharges: Number(payslip.employeeChargesTotal ?? 0),
       cnssEmpAmount: Number(payslip.totalCnss ?? 0),
       amoEmpAmount: 0,
@@ -238,7 +393,8 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
       incomeTaxBase: Number(payslip.incomeTaxBase ?? 0),
       incomeTaxAmount: Number(payslip.incomeTaxAmount ?? 0),
       employerChargesTotal: Number(payslip.employerChargesTotal ?? 0),
-      totalDeductions: Number(payslip.totalDeductions ?? 0) + Number(payslip.incomeTaxAmount ?? 0),
+      totalDeductions: Number(payslip.totalDeductions ?? 0),
+      currency: payslip.currency || "MAD",
     };
 
     // Calculate AMO/CIMR from snapshot
@@ -259,13 +415,8 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
 api.get("/payroll/runs/:runId/payslips/:payslipId/pdf", async (req, res) => {
   try {
     const { generatePayslipPdf } = await import("./services/payslipPdfService.js");
-    const pdfBuffer = await generatePayslipPdf(req.params.payslipId);
-    res.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="bulletin-${req.params.payslipId}.pdf"`,
-      "Content-Length": pdfBuffer.length,
-    });
-    res.send(pdfBuffer);
+    const result = await generatePayslipPdf(req.params.payslipId);
+    return res.download(result.filepath, result.filename);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -275,13 +426,8 @@ api.get("/payroll/runs/:runId/payslips/:payslipId/pdf", async (req, res) => {
 api.get("/payslips/:payslipId/pdf", async (req, res) => {
   try {
     const { generatePayslipPdf } = await import("./services/payslipPdfService.js");
-    const pdfBuffer = await generatePayslipPdf(req.params.payslipId);
-    res.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="bulletin-${req.params.payslipId}.pdf"`,
-      "Content-Length": pdfBuffer.length,
-    });
-    res.send(pdfBuffer);
+    const result = await generatePayslipPdf(req.params.payslipId);
+    return res.download(result.filepath, result.filename);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }

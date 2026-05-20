@@ -69,6 +69,51 @@
             border: 1px solid #ddd;
             padding: 10px;
         }
+
+        .detail-section {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .detail-card {
+            flex: 1;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background: #fafafa;
+        }
+
+        .detail-card h4 {
+            margin-bottom: 8px;
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .detail-card p {
+            margin: 3px 0;
+            font-size: 10px;
+        }
+
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 10px;
+        }
+
+        .detail-table th,
+        .detail-table td {
+            border: 1px solid #ddd;
+            padding: 5px;
+            text-align: left;
+        }
+
+        .detail-table th {
+            background: #f5f5f5;
+            font-weight: bold;
+        }
         
         .info-block {
             flex: 1;
@@ -231,10 +276,14 @@
                 <div class="company-name">{{company.name}}</div>
                 <div style="font-size: 9px;">{{company.address}}</div>
                 <div style="font-size: 9px;">{{company.city}}</div>
+                <div style="font-size: 9px;">{{company.phone}}</div>
+                <div style="font-size: 9px;">{{company.email}}</div>
             </div>
             <div style="text-align: right; font-size: 9px;">
                 <div><strong>Bulletin de Paie N°:</strong> {{payslip.payslipNumber}}</div>
+                <div><strong>Exécution paie:</strong> {{payslip.payrollRunNumber}} / {{payslip.payrollRunStatus}}</div>
                 <div><strong>Période:</strong> {{formatDate payroll.startDate}} - {{formatDate payroll.endDate}}</div>
+                <div><strong>Mois:</strong> {{payroll.month}} / {{payroll.year}} - {{payroll.type}}</div>
                 <div><strong>Date de génération:</strong> {{today}}</div>
             </div>
         </div>
@@ -247,18 +296,138 @@
                 <h4>Informations Employé</h4>
                 <p><strong>Nom & Prénom:</strong> {{employee.firstName}} {{employee.lastName}}</p>
                 <p><strong>Matricule:</strong> {{employee.employeeCode}}</p>
-                <p><strong>N° Sécurité Sociale:</strong> {{employee.socialSecurityNumber}}</p>
+                <p><strong>CIN:</strong> {{employee.cin}}</p>
+                <p><strong>N° CNSS:</strong> {{employee.cnssNumber}}</p>
+                <p><strong>Identifiant Fiscal:</strong> {{employee.taxIdentifier}}</p>
                 <p><strong>Fonction:</strong> {{employee.position}}</p>
+                <p><strong>Adresse:</strong> {{employee.address}}</p>
+                <p><strong>Ville:</strong> {{employee.city}}</p>
+                <p><strong>Mail:</strong> {{employee.email}}</p>
+                <p><strong>Téléphone:</strong> {{employee.phone}}</p>
             </div>
             <div class="info-block">
-                <h4>Contrat</h4>
+                <h4>Contrat et Paiement</h4>
                 <p><strong>Type de Contrat:</strong> {{contract.type}}</p>
+                <p><strong>Statut Contrat:</strong> {{contract.status}}</p>
+                <p><strong>Type de calcul:</strong> {{contract.salaryCalculationType}}</p>
                 <p><strong>Date de Début:</strong> {{formatDate contract.startDate}}</p>
-                <p><strong>Situation Familiale:</strong> {{employee.familialStatus}}</p>
-                <p><strong>Nombre d'Enfants:</strong> {{employee.numberChildren}}</p>
+                <p><strong>Date de Fin:</strong> {{formatDate contract.endDate}}</p>
+                <p><strong>Salaire de base:</strong> {{formatMoney contract.baseSalary}}</p>
+                <p><strong>Base taux:</strong> {{formatMoney contract.baseRate}}</p>
+                <p><strong>Heures / mois:</strong> {{formatMoney contract.hoursPerMonth}}</p>
+                <p><strong>Jours / mois:</strong> {{formatMoney contract.workingDaysPerMonth}}</p>
+                <p><strong>Salaire déclaré CNSS:</strong> {{formatMoney contract.cnssDeclaredSalary}}</p>
+                <p><strong>Transport:</strong> {{formatMoney contract.transportAllowance}}</p>
+                <p><strong>Représentation:</strong> {{formatMoney contract.representationAllowance}}</p>
+                <p><strong>Ancienneté:</strong> {{formatMoney contract.seniorityAllowance}}</p>
+                <p><strong>Mode de paiement:</strong> {{employee.paymentMode}}</p>
+                <p><strong>Banque:</strong> {{employee.bankName}}</p>
+                <p><strong>Compte:</strong> {{employee.bankAccountNumber}}</p>
+                {{#if contract.notes}}
+                <p><strong>Notes Contrat:</strong> {{contract.notes}}</p>
+                {{/if}}
             </div>
         </div>
-        
+
+        {{#if recurringItems.length}}
+        <div class="detail-section">
+            <div class="detail-card">
+                <h4>Éléments récurrents</h4>
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>Libellé</th>
+                            <th>Taux</th>
+                            <th>Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#each recurringItems}}
+                        <tr>
+                            <td>{{this.label}}</td>
+                            <td>{{formatMoney this.rate}}</td>
+                            <td>{{formatMoney this.amount}}</td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{/if}}
+
+        {{#if variableItems.length}}
+        <div class="detail-section">
+            <div class="detail-card">
+                <h4>Éléments variables</h4>
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>Libellé</th>
+                            <th>Taux / Qté</th>
+                            <th>Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#each variableItems}}
+                        <tr>
+                            <td>{{this.label}}</td>
+                            <td>{{#if this.quantity}}{{this.quantity}} × {{formatMoney this.rate}}{{else}}{{formatMoney this.rate}}{{/if}}</td>
+                            <td>{{formatMoney this.amount}}</td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{/if}}
+
+        {{#if statutoryRates.length}}
+        <div class="detail-section">
+            <div class="detail-card">
+                <h4>Taux statutaires</h4>
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>Libellé</th>
+                            <th>Taux</th>
+                            <th>Plafond</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#each statutoryRates}}
+                        <tr>
+                            <td>{{this.label}}</td>
+                            <td>{{formatMoney this.rate}}</td>
+                            <td>{{#if this.ceilingAmount}}{{formatMoney this.ceilingAmount}}{{else}}—{{/if}}</td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+            <div class="detail-card">
+                <h4>Barème IR</h4>
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>Tranche</th>
+                            <th>Taux</th>
+                            <th>Déduction</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#each taxBrackets}}
+                        <tr>
+                            <td>{{formatMoney this.min}} - {{#if this.max}}{{formatMoney this.max}}{{else}}∞{{/if}}</td>
+                            <td>{{formatMoney this.rate}}</td>
+                            <td>{{formatMoney this.deduction}}</td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {{/if}}
+
         <!-- Tableau des éléments de paie -->
         <table class="payslip-table">
             <thead>
@@ -285,6 +454,24 @@
                     <td colspan="3">SALAIRE BRUT</td>
                     <td class="amount">{{formatMoney payslip.grossSalary}}</td>
                 </tr>
+                {{#if payslip.taxableGross}}
+                <tr>
+                    <td colspan="3">SALAIRE IMPOSABLE</td>
+                    <td class="amount">{{formatMoney payslip.taxableGross}}</td>
+                </tr>
+                {{/if}}
+                {{#if payslip.totalAllowances}}
+                <tr>
+                    <td colspan="3">TOTAL ALLOCATIONS</td>
+                    <td class="amount">{{formatMoney payslip.totalAllowances}}</td>
+                </tr>
+                {{/if}}
+                {{#if payslip.totalBonuses}}
+                <tr>
+                    <td colspan="3">TOTAL PRIMES</td>
+                    <td class="amount">{{formatMoney payslip.totalBonuses}}</td>
+                </tr>
+                {{/if}}
                 
                 <tr class="section-header">
                     <td colspan="4">COTISATIONS SALARIALES</td>
@@ -329,24 +516,32 @@
                 {{/if}}
                 
                 <tr class="total">
-                    <td colspan="3">SALAIRE NET IMPOSABLE</td>
+                    <td colspan="3">SALAIRE NET À PAYER</td>
                     <td class="amount">{{formatMoney payslip.netSalary}}</td>
                 </tr>
             </tbody>
         </table>
         
-        <!-- Résumé -->
+        <!-- Résumé explicite -->
         <div class="summary">
             <div class="summary-item">
                 <div class="summary-label">Salaire Brut</div>
                 <div class="summary-value">{{formatMoney payslip.grossSalary}}</div>
             </div>
             <div class="summary-item">
-                <div class="summary-label">Total Cotisations & Impôts</div>
-                <div class="summary-value negative">- {{formatMoney payslip.totalDeductions}}</div>
+                <div class="summary-label">IR</div>
+                <div class="summary-value negative">- {{formatMoney payslip.incomeTaxAmount}}</div>
             </div>
             <div class="summary-item">
-                <div class="summary-label">Salaire Net</div>
+                <div class="summary-label">Cotisations</div>
+                <div class="summary-value negative">- {{formatMoney payslip.employeeChargesTotal}}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Avances / Retenues</div>
+                <div class="summary-value negative">- {{formatMoney payslip.totalAdvances}}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Net à Payer</div>
                 <div class="summary-value">{{formatMoney payslip.netSalary}}</div>
             </div>
         </div>

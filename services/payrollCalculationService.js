@@ -223,6 +223,26 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
     throw new Error(`Pas de contrat actif pour ${employee.firstName} ${employee.lastName}`);
   }
 
+  const allFlagsDisabled = config &&
+    config.cnssEnabled === false &&
+    config.amoEnabled === false &&
+    config.cimrEnabled === false &&
+    config.irEnabled === false;
+
+  const payrollSettings = {
+    cnssEnabled: allFlagsDisabled ? true : config?.cnssEnabled ?? true,
+    amoEnabled:  allFlagsDisabled ? true : config?.amoEnabled  ?? true,
+    cimrEnabled: allFlagsDisabled ? true : config?.cimrEnabled ?? false,
+    irEnabled:   allFlagsDisabled ? true : config?.irEnabled   ?? true,
+  };
+
+  if (allFlagsDisabled) {
+    console.warn(
+      `[PAIE] PayrollConfig pour companyId=${employee.companyId} est désactivée pour toutes les contributions. ` +
+      "Utilisation des taux actifs pour le calcul des cotisations et de l'IR."
+    );
+  }
+
   // ── 2. Période & taux ───────────────────────────────────────────────────────
   const period = await tx.payrollPeriod.findUnique({ where: { id: payrollPeriodId } });
   const effectiveDate = period.endDate; // Date de référence pour les taux
@@ -372,15 +392,15 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
   const cnssCeiling   = cnssEmployee.ceilingAmount ?? 6000; // Plafond DB ou 6000 MAD par défaut
   const cnssBase      = Math.min(cnssGross, cnssCeiling);   // Correction 4
 
-  const cnssEmpAmount  = config?.cnssEnabled ? round2(cnssBase  * cnssEmployee.rate) : 0;
-  const amoEmpAmount   = config?.amoEnabled  ? round2(amoGross  * amoEmployee.rate)  : 0;
-  const cimrEmpAmount  = config?.cimrEnabled ? round2(grossSalary * cimrEmployee.rate) : 0;
+  const cnssEmpAmount  = payrollSettings.cnssEnabled ? round2(cnssBase  * cnssEmployee.rate) : 0;
+  const amoEmpAmount   = payrollSettings.amoEnabled  ? round2(amoGross  * amoEmployee.rate)  : 0;
+  const cimrEmpAmount  = payrollSettings.cimrEnabled ? round2(grossSalary * cimrEmployee.rate) : 0;
   const totalEmpCharges = round2(cnssEmpAmount + amoEmpAmount + cimrEmpAmount);
 
   // ── 8. Cotisations patronales ───────────────────────────────────────────────
-  const cnssErAmount    = config?.cnssEnabled ? round2(cnssBase    * cnssEmployer.rate)  : 0;
-  const amoErAmount     = config?.amoEnabled  ? round2(amoGross    * amoEmployer.rate)   : 0;
-  const cimrErAmount    = config?.cimrEnabled ? round2(grossSalary * cimrEmployer.rate)  : 0;
+  const cnssErAmount    = payrollSettings.cnssEnabled ? round2(cnssBase    * cnssEmployer.rate)  : 0;
+  const amoErAmount     = payrollSettings.amoEnabled  ? round2(amoGross    * amoEmployer.rate)   : 0;
+  const cimrErAmount    = payrollSettings.cimrEnabled ? round2(grossSalary * cimrEmployer.rate)  : 0;
   const trainingTaxAmt  = round2(grossSalary * trainingTax.rate);
   const familyAllowAmt  = round2(grossSalary * familyAllow.rate);
   const socialBenefAmt  = round2(grossSalary * socialBenef.rate);
@@ -394,7 +414,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
   const taxableGross = Math.max(0, taxableGrossRaw - totalEmpCharges - professionalExpenses);
 
   // ── 10. Calcul IR ───────────────────────────────────────────────────────────
-  const irAmount = config?.irEnabled ? calculateIR(taxableGross, irBrackets) : 0;
+  const irAmount = payrollSettings.irEnabled ? calculateIR(taxableGross, irBrackets) : 0;
 
   // ── 11. Net ─────────────────────────────────────────────────────────────────
   const totalDeductions = round2(totalEmpCharges + irAmount + totalRawDeductions);
@@ -540,7 +560,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
 
   // Contributions détaillées
   const contributions = [];
-  if (config?.cnssEnabled) {
+  if (payrollSettings.cnssEnabled) {
     contributions.push(
       {
         payslipId: payslip.id,
@@ -564,7 +584,7 @@ export async function calculateEmployeePayroll(employeeId, payrollPeriodId, payr
       }
     );
   }
-  if (config?.cimrEnabled) {
+  if (payrollSettings.cimrEnabled) {
     contributions.push({
       payslipId: payslip.id,
       code: "CIMR_EMPLOYEE",
@@ -618,10 +638,10 @@ export async function calculatePayrollRun(payrollRunId) {
 
   if (!run) throw new Error("Exécution de paie introuvable");
 
-  // Correction 8 : bloquer si déjà COMPLETED
-  if (run.status === "COMPLETED") {
+  // Correction 8 : bloquer uniquement si verrouillé
+  if (run.status === "LOCKED") {
     throw new Error(
-      "Cette exécution est déjà terminée. Créez une nouvelle exécution ou annulez celle-ci avant de recalculer."
+      "Cette exécution est verrouillée et ne peut pas être recalculée. Créez une nouvelle exécution pour appliquer les modifications."
     );
   }
 

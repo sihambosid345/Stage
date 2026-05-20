@@ -10,6 +10,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { prisma } from "../prismaClient.js";
 
+function round2(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -113,12 +117,54 @@ export const generatePayslipPdf = async (payslipId) => {
   const period = payslip.payrollPeriod;
 
   // 2. Préparer les données pour le template
-  
-  // Grouper les items par catégorie
+
+  const statutoryRates = await prisma.statutoryRate.findMany({
+    where: {
+      AND: [
+        { OR: [{ companyId: company?.id }, { companyId: null }] },
+        { effectiveFrom: { lte: period?.endDate } },
+        { OR: [{ effectiveTo: { gte: period?.endDate } }, { effectiveTo: null }] },
+        { isActive: true },
+      ],
+    },
+    orderBy: [{ companyId: "desc" }, { effectiveFrom: "desc" }],
+  });
+
+  const formattedStatutoryRates = statutoryRates.map((rate) => ({
+    code: rate.code,
+    label: rate.label,
+    rate: Number(rate.rate),
+    ceilingAmount: rate.ceilingAmount != null ? Number(rate.ceilingAmount) : null,
+    floorAmount: rate.floorAmount != null ? Number(rate.floorAmount) : null,
+  }));
+
+  const taxBrackets = await prisma.taxBracket.findMany({
+    where: {
+      AND: [
+        { OR: [{ companyId: company?.id }, { companyId: null }] },
+        { taxCode: "IR_SALAIRE" },
+        { effectiveFrom: { lte: period?.endDate } },
+        { OR: [{ effectiveTo: { gte: period?.endDate } }, { effectiveTo: null }] },
+        { isActive: true },
+      ],
+    },
+    orderBy: [{ annualFrom: "asc" }],
+  });
+
+  const formattedTaxBrackets = taxBrackets.map((bracket) => ({
+    min: round2(Number(bracket.annualFrom) / 12),
+    max: bracket.annualTo != null ? round2(Number(bracket.annualTo) / 12) : null,
+    rate: Number(bracket.rate),
+    deduction: round2(Number(bracket.deductionAmount) / 12),
+  }));
+
+  const recurringItems = [];
+  const variableItems = [];
   const gainItems = [];
   const deductionItems = [];
 
   for (const item of payrollItems || []) {
+    const source = item.metadata?.source || "UNKNOWN";
     const lineItem = {
       code: item.code,
       label: item.label,
@@ -126,7 +172,15 @@ export const generatePayslipPdf = async (payslipId) => {
       rate: item.metadata?.rate || 0,
       quantity: item.metadata?.quantity || 1,
       category: item.amount >= 0 ? "GAINS" : "DEDUCTIONS",
+      source,
+      itemType: item.itemType,
     };
+
+    if (source === "RECURRING") {
+      recurringItems.push(lineItem);
+    } else if (source === "VARIABLE") {
+      variableItems.push(lineItem);
+    }
 
     if (item.amount >= 0 && item.itemType !== "TAX" && item.code !== "IR_SALAIRE") {
       gainItems.push(lineItem);
@@ -151,6 +205,7 @@ export const generatePayslipPdf = async (payslipId) => {
       status: payslip.status,
       createdAt: payslip.createdAt,
       grossSalary: payslip.grossSalary || 0,
+      taxableGross: payslip.taxableGross || 0,
       totalAllowances: payslip.totalAllowances || 0,
       totalBonuses: payslip.totalBonuses || 0,
       totalDeductions: payslip.totalDeductions || 0,
@@ -159,6 +214,7 @@ export const generatePayslipPdf = async (payslipId) => {
       totalCnss: payslip.totalCnss || 0,
       netSalary: payslip.netSalary || 0,
       cnssBase: payslip.cnssBase || 0,
+      cnssCeilingApplied: payslip.cnssCeilingApplied || 0,
       amoBase: payslip.amoBase || 0,
       incomeTaxBase: payslip.incomeTaxBase || 0,
       incomeTaxAmount: payslip.incomeTaxAmount || 0,
@@ -166,6 +222,9 @@ export const generatePayslipPdf = async (payslipId) => {
       employerChargesTotal: payslip.employerChargesTotal || 0,
       currency: payslip.currency || "MAD",
       declaredDays: payslip.declaredDays || 26,
+      pdfGeneratedAt: payslip.pdfGeneratedAt,
+      payrollRunNumber: payslip.payrollRun?.runNumber || "—",
+      payrollRunStatus: payslip.payrollRun?.status || "—",
     },
     employee: {
       id: employee.id,
@@ -175,29 +234,49 @@ export const generatePayslipPdf = async (payslipId) => {
       email: employee.email || "",
       phone: employee.phone || "",
       employeeCode: employee.employeeCode || "",
-      socialSecurityNumber: employee.socialSecurityNumber || "—",
+      cnssNumber: employee.cnssNumber || "—",
+      matricule: employee.matricule || "—",
+      taxIdentifier: employee.taxIdentifier || "—",
       position: employee.position?.title || employee.position?.name || "—",
-      familialStatus: employee.familialStatus || "—",
-      numberChildren: employee.numberChildren || 0,
+      maritalStatus: employee.maritalStatus || "—",
+      childrenCount: employee.childrenCount || 0,
+      address: employee.address || "—",
+      city: employee.city || "—",
+      paymentMode: employee.paymentMode || "—",
+      bankName: employee.bankName || "—",
+      bankAccountNumber: employee.bankAccountNumber || "—",
     },
     contract: {
       type: contract?.contractType || "—",
+      salaryCalculationType: contract?.salaryCalculationType || "—",
       startDate: contract?.startDate,
+      endDate: contract?.endDate,
       status: contract?.status || "—",
+      baseSalary: contract?.baseSalary || 0,
+      baseRate: contract?.baseRate || 0,
+      hoursPerMonth: contract?.hoursPerMonth || 0,
+      workingDaysPerMonth: contract?.workingDaysPerMonth || 0,
+      cnssDeclaredSalary: contract?.cnssDeclaredSalary || 0,
+      transportAllowance: contract?.transportAllowance || 0,
+      representationAllowance: contract?.representationAllowance || 0,
+      seniorityAllowance: contract?.seniorityAllowance || 0,
+      notes: contract?.notes || "",
     },
     company: {
       id: company?.id || "",
       name: company?.name || "—",
       address: company?.address || "",
       city: company?.city || "—",
-      phone: company?.phone || "",
-      email: company?.email || "",
+      phone: company?.phone || "—",
+      email: company?.email || "—",
     },
     payroll: {
       startDate: period?.startDate,
       endDate: period?.endDate,
       year: period?.year || new Date().getFullYear(),
       month: period?.month || new Date().getMonth() + 1,
+      type: period?.type || "—",
+      status: period?.status || "—",
     },
     items: gainItems,
     deductions: deductionItems.map((item) => ({
@@ -213,6 +292,10 @@ export const generatePayslipPdf = async (payslipId) => {
       employerAmount: c.employerAmount || 0,
       ceilingAmount: c.ceilingAmount || null,
     })),
+    recurringItems,
+    variableItems,
+    statutoryRates: formattedStatutoryRates,
+    taxBrackets: formattedTaxBrackets,
   };
 
   // 3. Compiler le HTML
