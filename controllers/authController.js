@@ -1,5 +1,6 @@
 // controllers/authController.js
 import * as authService from "../services/authService.js";
+import * as auditLogService from "../services/auditLogService.js";
 
 /**
  * POST /auth/login
@@ -10,7 +11,6 @@ export const loginController = async (req, res) => {
   try {
     const result = await authService.login(req.body);
     
-    // ✅ Ajouter isSuperAdmin explicitement dans la réponse
     const response = {
       token: result.token,
       user: {
@@ -19,12 +19,22 @@ export const loginController = async (req, res) => {
         firstName: result.user.firstName,
         lastName: result.user.lastName,
         role: result.user.role,
-        isSuperAdmin: result.user.isSuperAdmin || result.user.role === 'SUPER_ADMIN', // ← AJOUTER
+        isSuperAdmin: result.user.isSuperAdmin || result.user.role === 'SUPER_ADMIN',
         companyId: result.user.companyId,
         status: result.user.status,
         permissions: result.user.permissions || []
       }
     };
+
+    await auditLogService.logAction({
+      req,
+      action: 'LOGIN',
+      entityType: 'USER',
+      entityId: result.user.id,
+      companyId: result.user.companyId,
+      description: `Connexion de l\'utilisateur ${result.user.email}`,
+      metadata: { email: result.user.email }
+    });
     
     res.json(response);
   } catch (error) {

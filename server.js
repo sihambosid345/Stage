@@ -15,6 +15,7 @@ import payrollCalculationRoutes from './routes/payrollCalculationRoutes.js';
 
 import { authenticate, requireAdmin, requireSuperAdmin } from "./middlewares/authenticate.js";
 import { licenseMiddleware } from "./middlewares/licenseMiddleware.js";
+import { auditLogger } from "./middlewares/auditLogger.js";
 
 import * as companyCtrl    from "./controllers/companyController.js";
 import * as userCtrl       from "./controllers/userController.js";
@@ -66,6 +67,7 @@ app.use("/super-admin", superAdminRoutes);
 const api = Router();
 api.use(authenticate);
 api.use(licenseMiddleware);
+api.use(auditLogger);
 
 // ── Companies ────────────────────────────────────────────────────────────────
 api.post  ("/companies",      requireSuperAdmin, companyCtrl.createCompany);
