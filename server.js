@@ -12,7 +12,6 @@ const __dirname = path.dirname(__filename);
 import authRoutes       from "./routes/authRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
 import payrollCalculationRoutes from './routes/payrollCalculationRoutes.js';
-import auditLogRoutes from "./routes/auditLogRoutes.js";
 
 import { authenticate, requireAdmin, requireSuperAdmin } from "./middlewares/authenticate.js";
 import { licenseMiddleware } from "./middlewares/licenseMiddleware.js";
@@ -24,6 +23,7 @@ import * as positionCtrl   from "./controllers/positionController.js";
 import * as employeeCtrl   from "./controllers/employeeController.js";
 import * as contractCtrl   from "./controllers/employeeContractController.js";
 import * as attendanceCtrl from "./controllers/attendanceController.js";
+import * as auditLogCtrl   from "./controllers/auditLogController.js";
 import * as configCtrl     from "./controllers/payrollConfigController.js";
 import * as periodCtrl     from "./controllers/payrollPeriodController.js";
 import * as runCtrl        from "./controllers/payrollRunController.js";
@@ -40,7 +40,17 @@ console.log("JWT_SECRET =", process.env.JWT_SECRET);
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:4200", credentials: true }));
+// CORS configuration - accept multiple origins
+const allowedOrigins = [
+  "http://localhost:4200",
+  "http://localhost:49889",
+  process.env.FRONTEND_URL || "http://localhost:4200"
+].filter(Boolean);
+
+app.use(cors({ 
+  origin: allowedOrigins, 
+  credentials: true 
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -115,6 +125,13 @@ api.get   ("/attendances/:id",                    attendanceCtrl.getAttendance);
 api.put   ("/attendances/:id",                    attendanceCtrl.updateAttendance);
 api.delete("/attendances/:id",                    attendanceCtrl.deleteAttendance);
 
+// ── Audit Logs ────────────────────────────────────────────────────────────────
+api.post  ("/api/audit-logs",                         auditLogCtrl.createLog);
+api.get   ("/api/audit-logs",                         auditLogCtrl.getLogs);
+api.get   ("/api/audit-logs/company/:companyId",      auditLogCtrl.getLogsByCompany);
+api.get   ("/api/audit-logs/:id",                     auditLogCtrl.getLog);
+api.delete("/audit-logs/:id",                     auditLogCtrl.deleteLog);
+
 // ── Variable Items ────────────────────────────────────────────────────────────
 api.post  ("/variable-items",                     variableCtrl.createVariableItem);
 api.get   ("/variable-items",                     variableCtrl.getVariableItems);
@@ -151,9 +168,6 @@ api.get   ("/licenses/company/:companyId",        requireAdmin,      licenseCtrl
 api.get   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.getLicense);
 api.put   ("/licenses/:id",                       requireSuperAdmin, licenseCtrl.updateLicense);
 api.delete("/licenses/:id",                       requireSuperAdmin, licenseCtrl.deleteLicense);
-
-// Audit logs
-api.use('/audit-logs', auditLogRoutes);
 
 
 // Payroll Periods
@@ -232,18 +246,11 @@ api.get("/payroll/payslips/:payslipId", async (req, res) => {
           }
         },
         payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
+        payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
     });
     if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
-
-    const payrollItems = await prisma.payrollItem.findMany({
-      where: {
-        payrollRunId: payslip.payrollRunId,
-        employeeId: payslip.employeeId,
-      },
-      orderBy: { sortOrder: "asc" },
-    });
 
     const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
       "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -252,7 +259,7 @@ api.get("/payroll/payslips/:payslipId", async (req, res) => {
 
     const normalized = {
       ...payslip,
-      items: payrollItems || [],
+      items: payslip.payrollItems || [],
       employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
       matricule: emp?.matricule || emp?.employeeCode || "—",
       employeeCode: emp?.employeeCode || "—",
@@ -345,18 +352,11 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
           }
         },
         payrollPeriod: { select: { year: true, month: true, type: true, status: true } },
+        payrollItems: { orderBy: { sortOrder: "asc" } },
         contributions: true,
       },
     });
     if (!payslip) return res.status(404).json({ error: "Bulletin introuvable" });
-
-    const payrollItems = await prisma.payrollItem.findMany({
-      where: {
-        payrollRunId: payslip.payrollRunId,
-        employeeId: payslip.employeeId,
-      },
-      orderBy: { sortOrder: "asc" },
-    });
 
     // Normalize for frontend: add aliases expected by Angular component
     const MONTHS_FR = ["","Janvier","Février","Mars","Avril","Mai","Juin",
@@ -367,7 +367,7 @@ api.get("/payroll/runs/:runId/payslips/:payslipId", async (req, res) => {
     const normalized = {
       ...payslip,
       // Frontend reads "items" not "payrollItems"
-      items: payrollItems || [],
+      items: payslip.payrollItems || [],
       // Frontend reads "employeeName"
       employeeName: emp ? `${emp.firstName} ${emp.lastName}` : "—",
       matricule: emp?.matricule || emp?.employeeCode || "—",
@@ -1045,7 +1045,7 @@ api.post("/payroll/tax-brackets/seed", requireAdmin, async (req, res) => {
 });
 
 // ─── Mount API ────────────────────────────────────────────────────────────────
-app.use('/api', api);
+app.use(api);
 
 // ─── 404 & Error handlers ─────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: "Route introuvable." }));
