@@ -26,16 +26,20 @@ export const loginController = async (req, res) => {
       }
     };
 
-    await auditLogService.logAction({
-      req,
-      action: 'LOGIN',
-      entityType: 'USER',
-      entityId: result.user.id,
-      companyId: result.user.companyId,
-      description: `Connexion de l\'utilisateur ${result.user.email}`,
-      metadata: { email: result.user.email }
-    });
-    
+    if (result.user.companyId) {
+      await auditLogService.logAction({
+        req,
+        action: 'LOGIN',
+        entityType: 'USER',
+        entityId: result.user.id,
+        companyId: result.user.companyId,
+        description: `Connexion de l\'utilisateur ${result.user.email}`,
+        metadata: { email: result.user.email }
+      });
+    } else {
+      console.warn('Audit log skipped for login because companyId is missing:', result.user.email);
+    }
+
     res.json(response);
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
