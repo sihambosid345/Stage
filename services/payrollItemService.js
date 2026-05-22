@@ -8,6 +8,7 @@ const includeRelations = {
       runNumber: true,
       status: true,
       companyId: true,
+      payrollPeriod: { select: { id: true, year: true, month: true, startDate: true, endDate: true, status: true } },
     },
   },
 };
